@@ -50,6 +50,9 @@ def CompareAllTeams(SEASON):
     percentile_df.insert(0, "TEAM_NAME", stats_df["TEAM_NAME"])
     percentile_df = percentile_df.round(2)
 
+    percentile_df.to_csv("outputs/team_percentiles_2023_24.csv", index=False)
+    zscore_df.to_csv("outputs/team_zscores_2023_24.csv", index=False)
+
     return percentile_df, zscore_df
 
 percentile_df, zscore_df = CompareAllTeams("2023-24")
@@ -58,4 +61,4 @@ print("PERCENTILES")
 print(percentile_df.head())
 
 print("\nZ SCORES")
-print(zscore_df.head())
+print(zscore_df.head()) 
