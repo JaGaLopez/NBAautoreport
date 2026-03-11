@@ -1,5 +1,5 @@
 import numpy as np
-import pandas  as pd
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sklearn as sk
@@ -88,4 +88,4 @@ def BuildAverageTeam(SEASON):
     return averageteam
 
 
-BuildAverageTeam("2024-25")
+BuildAverageTeam("2023-24")
