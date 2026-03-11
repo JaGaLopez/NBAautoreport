@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from BuildAverageTeam import BuildAverageTeam
+from analytics.BuildAverageTeam import BuildAverageTeam
 
 app = FastAPI()
 

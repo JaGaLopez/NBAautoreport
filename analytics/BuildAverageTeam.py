@@ -84,8 +84,5 @@ def BuildAverageTeam(SEASON):
 
     averageteam = df[desired_cols].mean(numeric_only=True).round(2)
 
-    print(averageteam)
     return averageteam
 
-
-BuildAverageTeam("2023-24")
