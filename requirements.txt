@@ -6,4 +6,4 @@ matplotlib
 seaborn
 scikit-learn
 nba_api
-scipy.stats
+scipy
