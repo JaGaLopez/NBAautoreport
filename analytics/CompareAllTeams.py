@@ -1,14 +1,17 @@
+import numpy as np
 import pandas as pd
-from scipy.stats import percentileofscore
+import matplotlib.pyplot as plt
+import seaborn as sns
+import sklearn as sk
 from nba_api.stats.endpoints import leaguedashteamstats as teamstats
+from scipy.stats import percentileofscore
 from analytics.BuildAverageTeam import BuildAverageTeam
-
 
 def CompareAllTeams(SEASON):
 
     SEASON_TYPE = "Regular Season"
 
-    # Pull team stats (same data source BuildAverageTeam used)
+    
     df = teamstats.LeagueDashTeamStats(
         season=SEASON,
         season_type_all_star=SEASON_TYPE,
@@ -16,18 +19,12 @@ def CompareAllTeams(SEASON):
         measure_type_detailed_defense="Base",
     ).get_data_frames()[0]
 
-    # Get the average team (THIS is the key part)
     avg_team = BuildAverageTeam(SEASON)
 
-    # Only keep stats that exist in the average output
     stat_cols = [col for col in avg_team.index if col in df.columns]
 
     stats_df = df[["TEAM_NAME"] + stat_cols].copy()
     league_stats = stats_df[stat_cols]
-
-    # -----------------------
-    # STANDARD DEVIATIONS FROM MEAN
-    # -----------------------
 
     league_std = league_stats.std()
 
@@ -35,9 +32,6 @@ def CompareAllTeams(SEASON):
     zscore_df.insert(0, "TEAM_NAME", stats_df["TEAM_NAME"])
     zscore_df = zscore_df.round(2)
 
-    # -----------------------
-    # PERCENTILES
-    # -----------------------
 
     percentile_df = pd.DataFrame()
 

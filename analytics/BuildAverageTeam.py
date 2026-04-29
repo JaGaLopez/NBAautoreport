@@ -6,8 +6,9 @@ import sklearn as sk
 from nba_api.stats.endpoints import leaguedashteamstats as teamstats
 
 def BuildAverageTeam(SEASON):
+
     SEASON_TYPE = "Regular Season"
-    PER_MODE = "PerGame"   # use the same mode for both tables
+    PER_MODE = "PerGame"
 
     base_df = teamstats.LeagueDashTeamStats(
         season=SEASON,
@@ -26,13 +27,14 @@ def BuildAverageTeam(SEASON):
     adv_keep = [
         "TEAM_ID",
         "TEAM_NAME",
-        "TS_PCT", 
-        "AST_PCT", 
-        "OREB_PCT", 
-        "DREB_PCT", 
-        "REB_PCT", 
+        "TS_PCT",
+        "AST_PCT",
+        "OREB_PCT",
+        "DREB_PCT",
+        "REB_PCT",
         "TM_TOV_PCT"
     ]
+
     adv_df = adv_df[adv_keep]
 
     df = base_df.merge(adv_df, on=["TEAM_ID", "TEAM_NAME"], how="left")
@@ -84,5 +86,10 @@ def BuildAverageTeam(SEASON):
 
     averageteam = df[desired_cols].mean(numeric_only=True).round(2)
 
+    # convert Series -> DataFrame
+    avg_df = averageteam.to_frame().T
+    avg_df.insert(0, "SEASON", SEASON)
+
+    avg_df.to_csv(f"outputs/average_team_{SEASON}.csv", index=False)
     return averageteam
 
