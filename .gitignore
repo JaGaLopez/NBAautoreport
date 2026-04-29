@@ -1,2 +1,2 @@
-requirements.txt
-Dockerfile.txt
+__pycache__
+*.pyc
