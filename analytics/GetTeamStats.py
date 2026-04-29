@@ -1,16 +1,9 @@
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import sklearn as sk
 from nba_api.stats.endpoints import leaguedashteamstats as teamstats
-from scipy.stats import percentileofscore
 
-def CompareAllTeams(SEASON):
-
+def GetTeamStats(SEASON):
     SEASON_TYPE = "Regular Season"
 
-    
     df = teamstats.LeagueDashTeamStats(
         season=SEASON,
         season_type_all_star=SEASON_TYPE,
