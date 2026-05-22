@@ -4,13 +4,31 @@ import pandas as pd
 
 API_URL = "https://nbaautoreport.jglws.com"
 
-st.title("NBA Team Stats")
+st.set_page_config(layout="wide")
 
-season = st.selectbox("Season", ["2024-25", "2023-24", "2022-23", "2021-22"])
+st.markdown("""
+<style>
+    .block-container { padding-top: 2rem; }
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
+        border-left: 2px solid #cccccc;
+        padding-left: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-with st.spinner("Loading stats..."):
-    response = requests.get(f"{API_URL}/teams/{season}")
-    data = response.json()
-    df = pd.DataFrame(data)
+col_left, col_right = st.columns(2)
 
-st.dataframe(df, use_container_width=True)
+with col_left:
+    st.title("NBA Team Stats")
+
+    season = st.selectbox("Season", ["2024-25", "2023-24", "2022-23", "2021-22"])
+
+    with st.spinner("Loading stats..."):
+        response = requests.get(f"{API_URL}/teams/{season}")
+        data = response.json()
+        df = pd.DataFrame(data)
+
+    st.dataframe(df, use_container_width=True)
+
+with col_right:
+    st.title("Food for Thought")
