@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-cd /mnt/user/websites/NBAautoreport
+cd "${REPO_PATH:-/mnt/user/websites/NBAautoreport}"
 git pull
 
 # Update API
