@@ -27,8 +27,80 @@ ADV_COLS = {
 }
 
 BASIC_LOWER_IS_BETTER = {"TOV", "PF"}
-ADV_LOWER_IS_BETTER = {"DRTG", "TOV%"}
+ADV_LOWER_IS_BETTER   = {"DRTG", "TOV%"}
 
+PERCENTILE_STYLE = JsCode("""
+function(params) {
+    if (params.colDef.field === 'Metric') return null;
+    if (!params.data || params.data.Metric !== 'Percentile') return null;
+    var val = parseFloat(params.value);
+    if (isNaN(val)) return null;
+    if (val >= 80) return {backgroundColor: '#27ae60', color: 'white'};
+    if (val >= 60) return {backgroundColor: '#a8e6cf', color: 'black'};
+    if (val >= 40) return {backgroundColor: '#e8e8e8', color: 'black'};
+    if (val >= 20) return {backgroundColor: '#ffb3b3', color: 'black'};
+    return {backgroundColor: '#e74c3c', color: 'white'};
+}
+""")
+
+DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
+
+
+def show_table(df, *, double_click=False, cell_style=None, height=None):
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_grid_options(suppressMovableColumns=True)
+
+    if cell_style is not None:
+        gb.configure_default_column(filter=False, resizable=True, sortable=False, cellStyle=cell_style)
+    else:
+        gb.configure_default_column(filter=False, resizable=True, sortable=True)
+
+    if double_click:
+        gb.configure_selection(selection_mode="single", use_checkbox=False)
+        gb.configure_grid_options(
+            suppressRowClickSelection=True,
+            onRowDoubleClicked=DOUBLE_CLICK_JS,
+        )
+
+    kwargs = dict(
+        gridOptions=gb.build(),
+        allow_unsafe_jscode=True,
+        use_container_width=True,
+        update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
+    )
+    if height is not None:
+        kwargs["height"] = height
+
+    return AgGrid(df, **kwargs)
+
+
+def build_comparison(df, team_name, lower_is_better_set):
+    stat_cols = [
+        c for c in df.columns
+        if c != "Team" and pd.api.types.is_numeric_dtype(df[c])
+    ]
+    team_row  = df[df["Team"] == team_name][stat_cols].iloc[0]
+    avg       = df[stat_cols].mean().round(2)
+    delta     = (team_row - avg).round(2)
+
+    pcts = {}
+    for col in stat_cols:
+        val      = team_row[col]
+        all_vals = df[col].dropna()
+        pct      = round((all_vals < val).sum() / len(all_vals) * 100, 1)
+        if col in lower_is_better_set:
+            pct = round(100 - pct, 1)
+        pcts[col] = pct
+
+    comp = pd.DataFrame(
+        [team_row, avg, delta, pd.Series(pcts)],
+        index=[team_name, "League Average", "Delta", "Percentile"],
+    )
+    comp.index.name = "Metric"
+    return comp.reset_index()
+
+
+# ── Page setup ──────────────────────────────────────────────────────────────
 st.set_page_config(layout="wide")
 
 st.markdown("""
@@ -51,83 +123,32 @@ with sel_col2:
 
 with st.spinner("Loading stats..."):
     basic_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}").json())
-    adv_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
+    adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
 
-    basic_raw["2P"] = basic_raw["FGM"] - basic_raw["FG3M"]
+    basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = (basic_raw["2P"] / basic_raw["2PA"]).round(3)
 
     basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
-    adv_df = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
+    adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
 
-
-def build_comparison(df, team_name, lower_is_better_set):
-    stat_cols = [c for c in df.columns if c != "Team"]
-    team_row = df[df["Team"] == team_name][stat_cols].iloc[0]
-    league_avg = df[stat_cols].mean().round(2)
-    delta = (team_row - league_avg).round(2)
-
-    percentile_row = {}
-    for col in stat_cols:
-        val = team_row[col]
-        all_vals = df[col].dropna()
-        pct = round((all_vals < val).sum() / len(all_vals) * 100, 1)
-        if col in lower_is_better_set:
-            pct = round(100 - pct, 1)
-        percentile_row[col] = pct
-
-    return pd.DataFrame(
-        [team_row, league_avg, delta, pd.Series(percentile_row)],
-        index=[team_name, "League Average", "Delta", "Percentile"]
-    )
-
-
-def style_comparison(comp_df):
-    def color_percentile(val):
-        try:
-            v = float(val)
-            if v >= 80:   return "background-color: #27ae60; color: white"
-            elif v >= 60: return "background-color: #a8e6cf"
-            elif v >= 40: return "background-color: #f0f0f0"
-            elif v >= 20: return "background-color: #ffb3b3"
-            else:         return "background-color: #e74c3c; color: white"
-        except:
-            return ""
-
-    return comp_df.style.apply(
-        lambda row: [color_percentile(v) if row.name == "Percentile" else "" for v in row],
-        axis=1
-    )
-
-
+# ── Layout ──────────────────────────────────────────────────────────────────
 col_left, col_right = st.columns(2)
 
 with col_left:
     st.subheader("All Teams")
-
-    gb = GridOptionsBuilder.from_dataframe(basic_df)
-    gb.configure_selection(selection_mode="single", use_checkbox=False)
-    gb.configure_grid_options(
-        suppressRowClickSelection=True,
-        onRowDoubleClicked=JsCode("function(e){ e.node.setSelected(true); }")
-    )
-    result = AgGrid(
-        basic_df,
-        gridOptions=gb.build(),
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
-        allow_unsafe_jscode=True,
-        use_container_width=True,
-    )
+    result = show_table(basic_df, double_click=True)
 
     st.caption("Advanced Stats")
-    st.dataframe(adv_df, use_container_width=True, hide_index=True)
+    show_table(adv_df)
 
     selected_rows = result["selected_rows"]
-    selected_team = (
-        selected_rows.iloc[0]["Team"]
-        if selected_rows is not None and len(selected_rows) > 0
-        else None
-    )
+    selected_team = None
+    if selected_rows is not None:
+        if hasattr(selected_rows, "iloc") and len(selected_rows) > 0:
+            selected_team = selected_rows.iloc[0]["Team"]
+        elif isinstance(selected_rows, list) and len(selected_rows) > 0:
+            selected_team = selected_rows[0]["Team"]
 
 with col_right:
     st.subheader("Food for Thought")
@@ -137,7 +158,9 @@ with col_right:
     elif not selected_team:
         st.caption("Double-click a team on the left to compare.")
     else:
-        st.dataframe(style_comparison(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER)), use_container_width=True)
+        show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
+                   cell_style=PERCENTILE_STYLE, height=175)
 
         st.caption("Advanced Stats")
-        st.dataframe(style_comparison(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER)), use_container_width=True)
+        show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
+                   cell_style=PERCENTILE_STYLE, height=175)
