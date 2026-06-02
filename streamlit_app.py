@@ -48,12 +48,15 @@ DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
 def show_table(df, *, double_click=False, cell_style=None, height=None):
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_grid_options(suppressMovableColumns=True)
+    gb.configure_grid_options(
+        suppressMovableColumns=True,
+        onFirstDataRendered=JsCode("function(p){ p.api.autoSizeAllColumns(); }"),
+    )
 
     if cell_style is not None:
-        gb.configure_default_column(filter=False, resizable=True, sortable=False, cellStyle=cell_style)
+        gb.configure_default_column(suppressMenu=True, resizable=True, sortable=False, cellStyle=cell_style)
     else:
-        gb.configure_default_column(filter=False, resizable=True, sortable=True)
+        gb.configure_default_column(suppressMenu=True, resizable=True, sortable=True)
 
     if double_click:
         gb.configure_selection(selection_mode="single", use_checkbox=False)
