@@ -64,9 +64,6 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
 
     go = gb.build()
 
-    # Size every column to fit its content + header; wide tables scroll instead of clipping
-    go["autoSizeStrategy"] = {"type": "fitCellContents"}
-
     no_filter = {
         "filter": False,
         "suppressMenu": True,
@@ -74,8 +71,18 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
         "suppressHeaderMenuButton": True,
     }
     go.setdefault("defaultColDef", {}).update(no_filter)
+
+    # Lock each column to a deterministic width sized to its header + cell content.
+    # Wide tables scroll horizontally; nothing clips, nothing over-expands.
     for col in go.get("columnDefs", []):
         col.update(no_filter)
+        field = col.get("field")
+        if field in df.columns:
+            longest = max([len(str(field))] + [len(str(v)) for v in df[field].tolist()])
+            w = max(60, longest * 9 + 26)
+            col["width"] = w
+            col["minWidth"] = w
+            col["maxWidth"] = w
 
     kwargs = dict(
         gridOptions=go,
