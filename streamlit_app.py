@@ -79,7 +79,10 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
         field = col.get("field")
         if field in df.columns:
             longest = max([len(str(field))] + [len(str(v)) for v in df[field].tolist()])
-            w = max(60, longest * 9 + 26)
+            if pd.api.types.is_numeric_dtype(df[field]):
+                w = max(60, longest * 9 + 26)
+            else:  # text columns (Team / Metric) use a tighter proportional width
+                w = max(60, longest * 8 + 8)
             col["width"] = w
             col["minWidth"] = w
             col["maxWidth"] = w
