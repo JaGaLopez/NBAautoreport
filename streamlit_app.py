@@ -104,7 +104,7 @@ def round_for_display(df):
     return df
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)
 def load_data(season):
     basic_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}").json())
     adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
