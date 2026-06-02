@@ -89,6 +89,36 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
     return AgGrid(df, **kwargs)
 
 
+def round_for_display(df):
+    """Round numeric columns to a readable precision based on their magnitude."""
+    for col in df.columns:
+        if col == "Team" or not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        m = df[col].abs().max()
+        if m <= 1:      # fractions / percentages (e.g. 0.553)
+            df[col] = df[col].round(3)
+        elif m <= 10:   # ratios (e.g. 1.91)
+            df[col] = df[col].round(2)
+        else:           # counting stats / ratings (e.g. 54.1)
+            df[col] = df[col].round(1)
+    return df
+
+
+@st.cache_data(ttl=3600)
+def load_data(season):
+    basic_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}").json())
+    adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
+
+    basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
+    basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
+    basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
+
+    basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
+    adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
+
+    return round_for_display(basic_df), round_for_display(adv_df)
+
+
 def build_comparison(df, team_name, lower_is_better_set):
     stat_cols = [
         c for c in df.columns
@@ -137,15 +167,7 @@ with sel_col2:
     view = st.selectbox("View", ["Stats", "Narratives"])
 
 with st.spinner("Loading stats..."):
-    basic_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}").json())
-    adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
-
-    basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
-    basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
-    basic_raw["2P%"] = (basic_raw["2P"] / basic_raw["2PA"]).round(3)
-
-    basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
-    adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
+    basic_df, adv_df = load_data(season)
 
 # ── Layout ──────────────────────────────────────────────────────────────────
 # Row 1: basic tables side by side
