@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, ColumnsAutoSizeMode
 from st_aggrid.shared import JsCode
 
 API_URL = "https://nbaautoreport.jglws.com"
@@ -67,16 +67,21 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
 
     go = gb.build()
 
-    # Directly patch every column def — most reliable across st-aggrid versions
-    go.setdefault("defaultColDef", {}).update({"filter": False, "suppressMenu": True})
+    no_filter = {
+        "filter": False,
+        "suppressMenu": True,
+        "suppressHeaderFilterButton": True,
+        "suppressHeaderMenuButton": True,
+    }
+    go.setdefault("defaultColDef", {}).update(no_filter)
     for col in go.get("columnDefs", []):
-        col["filter"] = False
-        col["suppressMenu"] = True
+        col.update(no_filter)
 
     kwargs = dict(
         gridOptions=go,
         allow_unsafe_jscode=True,
         use_container_width=True,
+        columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
         update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
     )
     if height is not None:
