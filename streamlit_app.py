@@ -16,26 +16,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.title("NBA Team Stats")
+season = st.selectbox("Season", ["2024-25", "2023-24", "2022-23", "2021-22"])
+
+with st.spinner("Loading stats..."):
+    response = requests.get(f"{API_URL}/teams/{season}")
+    data = response.json()
+    df = pd.DataFrame(data)
+    df = df.drop(columns=["TEAM_ID", "GP", "MIN"], errors="ignore")
+
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.title("NBA Team Stats")
+    st.markdown("**All Teams**")
+    event = st.dataframe(df, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
 
-    season = st.selectbox("Season", ["2024-25", "2023-24", "2022-23", "2021-22"])
-
-    with st.spinner("Loading stats..."):
-        response = requests.get(f"{API_URL}/teams/{season}")
-        data = response.json()
-        df = pd.DataFrame(data)
-        df = df.drop(columns=["TEAM_ID"], errors="ignore")
-
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    selected_team = st.selectbox("Select a team to compare", [""] + df["TEAM_NAME"].tolist())
+selected_team = None
+if event.selection.rows:
+    selected_team = df.iloc[event.selection.rows[0]]["TEAM_NAME"]
 
 with col_right:
-    st.title("Food for Thought")
-
+    st.markdown("**Food for Thought**")
     if selected_team:
         rank_cols = {col for col in df.columns if col.endswith("_RANK")}
         stat_cols = [
@@ -56,3 +57,5 @@ with col_right:
         )
 
         st.dataframe(comparison, use_container_width=True)
+    else:
+        st.caption("Click a team on the left to compare.")
