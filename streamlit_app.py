@@ -165,12 +165,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("NBA Team Stats")
+st.markdown("<h1 style='text-align: center;'>NBA Team Stats</h1>", unsafe_allow_html=True)
 
-sel_col1, sel_col2 = st.columns(2)
-with sel_col1:
+# Section headers row
+head_left, head_right = st.columns(2)
+with head_left:
+    st.subheader("All Teams")
+with head_right:
+    st.subheader("Food for Thought")
+
+# Dropdowns row (under their respective headers)
+sel_left, sel_right = st.columns(2)
+with sel_left:
     season = st.selectbox("Season", ["2024-25", "2023-24", "2022-23", "2021-22"])
-with sel_col2:
+with sel_right:
     view = st.selectbox("View", ["Stats", "Narratives"])
 
 with st.spinner("Loading stats..."):
@@ -181,7 +189,7 @@ with st.spinner("Loading stats..."):
 row1_left, row1_right = st.columns(2)
 
 with row1_left:
-    st.subheader("All Teams")
+    st.caption("Per Game Stats")
     result = show_table(basic_df, double_click=True)
 
     selected_rows = result["selected_rows"]
@@ -193,15 +201,15 @@ with row1_left:
             selected_team = selected_rows[0]["Team"]
 
 with row1_right:
-    st.subheader("Food for Thought")
-
     if view == "Narratives":
         st.info("Narratives coming soon.")
-    elif not selected_team:
-        st.caption("Double-click a team on the left to compare.")
     else:
-        show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
-                   cell_style=PERCENTILE_STYLE, height=175)
+        st.caption("Comparison Chart")
+        if not selected_team:
+            st.caption("Double-click a team on the left to compare.")
+        else:
+            show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
+                       cell_style=PERCENTILE_STYLE, height=175)
 
 # Row 2: advanced tables side by side (aligned because they start their own column row)
 row2_left, row2_right = st.columns(2)
