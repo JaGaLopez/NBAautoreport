@@ -27,11 +27,11 @@ with col_left:
         response = requests.get(f"{API_URL}/teams/{season}")
         data = response.json()
         df = pd.DataFrame(data)
+        df = df.drop(columns=["TEAM_ID"], errors="ignore")
 
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 with col_right:
-    st.title("Food for Thought")
+    st.title("Food for Thought: Pick a Team")
 
 
-#lkgjkslgsgsgdhsdhfkhjsdf
