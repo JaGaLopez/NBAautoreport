@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, ColumnsAutoSizeMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from st_aggrid.shared import JsCode
 
 API_URL = "https://nbaautoreport.jglws.com"
@@ -48,10 +48,7 @@ DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
 def show_table(df, *, double_click=False, cell_style=None, height=None):
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_grid_options(
-        suppressMovableColumns=True,
-        onFirstDataRendered=JsCode("function(p){ p.api.autoSizeAllColumns(); }"),
-    )
+    gb.configure_grid_options(suppressMovableColumns=True)
 
     if cell_style is not None:
         gb.configure_default_column(resizable=True, sortable=False, cellStyle=cell_style)
@@ -67,6 +64,9 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
 
     go = gb.build()
 
+    # Size every column to fit its content + header; wide tables scroll instead of clipping
+    go["autoSizeStrategy"] = {"type": "fitCellContents"}
+
     no_filter = {
         "filter": False,
         "suppressMenu": True,
@@ -81,7 +81,6 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
         gridOptions=go,
         allow_unsafe_jscode=True,
         use_container_width=True,
-        columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
         update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
     )
     if height is not None:
@@ -149,14 +148,12 @@ with st.spinner("Loading stats..."):
     adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
 
 # ── Layout ──────────────────────────────────────────────────────────────────
-col_left, col_right = st.columns(2)
+# Row 1: basic tables side by side
+row1_left, row1_right = st.columns(2)
 
-with col_left:
+with row1_left:
     st.subheader("All Teams")
     result = show_table(basic_df, double_click=True)
-
-    st.caption("Advanced Stats")
-    show_table(adv_df)
 
     selected_rows = result["selected_rows"]
     selected_team = None
@@ -166,7 +163,7 @@ with col_left:
         elif isinstance(selected_rows, list) and len(selected_rows) > 0:
             selected_team = selected_rows[0]["Team"]
 
-with col_right:
+with row1_right:
     st.subheader("Food for Thought")
 
     if view == "Narratives":
@@ -177,6 +174,15 @@ with col_right:
         show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
                    cell_style=PERCENTILE_STYLE, height=175)
 
+# Row 2: advanced tables side by side (aligned because they start their own column row)
+row2_left, row2_right = st.columns(2)
+
+with row2_left:
+    st.caption("Advanced Stats")
+    show_table(adv_df)
+
+with row2_right:
+    if view == "Stats" and selected_team:
         st.caption("Advanced Stats")
         show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
                    cell_style=PERCENTILE_STYLE, height=175)
