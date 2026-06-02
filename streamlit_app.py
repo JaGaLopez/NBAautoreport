@@ -31,7 +31,28 @@ with col_left:
 
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+    selected_team = st.selectbox("Select a team to compare", [""] + df["TEAM_NAME"].tolist())
+
 with col_right:
-    st.title("Food for Thought: Pick a Team")
+    st.title("Food for Thought")
 
+    if selected_team:
+        rank_cols = {col for col in df.columns if col.endswith("_RANK")}
+        stat_cols = [
+            col for col in df.columns
+            if col != "TEAM_NAME"
+            and col not in rank_cols
+            and pd.api.types.is_numeric_dtype(df[col])
+        ]
 
+        team_row = df[df["TEAM_NAME"] == selected_team][stat_cols].iloc[0]
+        league_avg = df[stat_cols].mean().round(2)
+        delta = (team_row - league_avg).round(2)
+        vs_league = (delta / df[stat_cols].std()).round(2)
+
+        comparison = pd.DataFrame(
+            [team_row, league_avg, delta, vs_league],
+            index=[selected_team, "League Average", "Delta", "vs League (σ)"]
+        )
+
+        st.dataframe(comparison, use_container_width=True)
