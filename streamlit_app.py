@@ -54,9 +54,9 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
     )
 
     if cell_style is not None:
-        gb.configure_default_column(suppressMenu=True, resizable=True, sortable=False, cellStyle=cell_style)
+        gb.configure_default_column(resizable=True, sortable=False, cellStyle=cell_style)
     else:
-        gb.configure_default_column(suppressMenu=True, resizable=True, sortable=True)
+        gb.configure_default_column(resizable=True, sortable=True)
 
     if double_click:
         gb.configure_selection(selection_mode="single", use_checkbox=False)
@@ -65,8 +65,16 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
             onRowDoubleClicked=DOUBLE_CLICK_JS,
         )
 
+    go = gb.build()
+
+    # Directly patch every column def — most reliable across st-aggrid versions
+    go.setdefault("defaultColDef", {}).update({"filter": False, "suppressMenu": True})
+    for col in go.get("columnDefs", []):
+        col["filter"] = False
+        col["suppressMenu"] = True
+
     kwargs = dict(
-        gridOptions=gb.build(),
+        gridOptions=go,
         allow_unsafe_jscode=True,
         use_container_width=True,
         update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
