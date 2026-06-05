@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analytics.GetTeamStats import GetTeamStats
 from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
+from analytics.GetWeeklyNetRating import GetWeeklyNetRating
 
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -25,6 +26,9 @@ DATA_DIR = os.environ.get("DATA_DIR", "data")
 # (Playoffs are out of scope for now.)
 GAMES_IN_SEASON = 82
 TEAMS_IN_LEAGUE = 30
+
+# Every JSON file a fully-processed season should have
+KINDS = ("basic", "advanced", "average", "weekly_netrtg")
 
 
 def _write(filename, obj):
@@ -49,12 +53,20 @@ def _season_complete(season):
     )
 
 
+def _has_all_files(season):
+    return all(
+        os.path.exists(os.path.join(DATA_DIR, f"{season}_{kind}.json"))
+        for kind in KINDS
+    )
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
     for season in SEASONS:
-        # Skip seasons that finished (all teams at 82 GP) — stored indefinitely, no API calls
-        if _season_complete(season):
+        # Skip finished seasons only if every file is already stored (so new
+        # datasets like weekly net rating get backfilled once for old seasons).
+        if _season_complete(season) and _has_all_files(season):
             print(f"Skipping {season} (all 82 games played, already stored)")
             continue
 
@@ -66,10 +78,13 @@ def main():
         time.sleep(1)
         average = BuildAverageTeam(season)
         time.sleep(1)
+        weekly = GetWeeklyNetRating(season)
+        time.sleep(1)
 
         _write(f"{season}_basic.json", basic.to_dict(orient="records"))
         _write(f"{season}_advanced.json", advanced.to_dict(orient="records"))
         _write(f"{season}_average.json", average.to_dict())
+        _write(f"{season}_weekly_netrtg.json", weekly)
 
     print(f"Done. Data dir: {DATA_DIR}")
 

@@ -49,11 +49,15 @@ def CompareAllTeams(SEASON):
 
     return percentile_df, zscore_df
 
-percentile_df, zscore_df = CompareAllTeams("2023-24")
 
-print("PERCENTILES")
-print(percentile_df.head())
+# Guard so importing this module never triggers nba_api calls.
+# All nba_api access must go through the daily precompute (scripts/precompute.py).
+if __name__ == "__main__":
+    percentile_df, zscore_df = CompareAllTeams("2023-24")
 
-print("\nZ SCORES")
-print(zscore_df.head()) 
+    print("PERCENTILES")
+    print(percentile_df.head())
+
+    print("\nZ SCORES")
+    print(zscore_df.head())
 

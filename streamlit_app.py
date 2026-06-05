@@ -82,7 +82,7 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
             if pd.api.types.is_numeric_dtype(df[field]):
                 w = max(60, longest * 9 + 26)
             else:  # text columns (Team / Metric) use a tighter proportional width
-                w = max(60, longest * 7 + 6)
+                w = max(60, longest * 6 + 4)
             col["width"] = w
             col["minWidth"] = w
             col["maxWidth"] = w
@@ -118,6 +118,7 @@ def round_for_display(df):
 def load_data(season):
     basic_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}").json())
     adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
+    weekly    = requests.get(f"{API_URL}/teams/{season}/weekly-netrating").json()
 
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
@@ -126,7 +127,19 @@ def load_data(season):
     basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
     adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
 
-    return round_for_display(basic_df), round_for_display(adv_df)
+    return round_for_display(basic_df), round_for_display(adv_df), weekly
+
+
+def selected_team_from(result):
+    """Extract the selected team name from an AgGrid result, or None."""
+    rows = result["selected_rows"]
+    if rows is None:
+        return None
+    if hasattr(rows, "iloc") and len(rows) > 0:
+        return rows.iloc[0]["Team"]
+    if isinstance(rows, list) and len(rows) > 0:
+        return rows[0]["Team"]
+    return None
 
 
 def build_comparison(df, team_name, lower_is_better_set):
@@ -185,44 +198,66 @@ with sel_right:
     view = st.selectbox("View", ["Stats", "Narratives"])
 
 with st.spinner("Loading stats..."):
-    basic_df, adv_df = load_data(season)
+    basic_df, adv_df, weekly = load_data(season)
 
 # ── Layout ──────────────────────────────────────────────────────────────────
-# Row 1: basic tables side by side
+# Create both column rows up front so we can fill them in any order.
 row1_left, row1_right = st.columns(2)
+row2_left, row2_right = st.columns(2)
 
+# Render the two selectable source tables first (both double-clickable)
 with row1_left:
     st.caption("Per Game Stats")
-    result = show_table(basic_df, double_click=True)
+    basic_result = show_table(basic_df, double_click=True)
 
-    selected_rows = result["selected_rows"]
-    selected_team = None
-    if selected_rows is not None:
-        if hasattr(selected_rows, "iloc") and len(selected_rows) > 0:
-            selected_team = selected_rows.iloc[0]["Team"]
-        elif isinstance(selected_rows, list) and len(selected_rows) > 0:
-            selected_team = selected_rows[0]["Team"]
+with row2_left:
+    st.caption("Advanced Stats")
+    adv_result = show_table(adv_df, double_click=True)
 
+# Figure out which table the user most recently clicked
+basic_sel = selected_team_from(basic_result)
+adv_sel   = selected_team_from(adv_result)
+
+selected_team = st.session_state.get("selected_team")
+if basic_sel is not None and basic_sel != st.session_state.get("prev_basic_sel"):
+    selected_team = basic_sel
+elif adv_sel is not None and adv_sel != st.session_state.get("prev_adv_sel"):
+    selected_team = adv_sel
+elif selected_team is None:
+    selected_team = basic_sel or adv_sel
+
+st.session_state["prev_basic_sel"] = basic_sel
+st.session_state["prev_adv_sel"]   = adv_sel
+st.session_state["selected_team"]  = selected_team
+
+# Now render the comparison tables on the right
 with row1_right:
     if view == "Narratives":
         st.info("Narratives coming soon.")
     else:
         st.caption("Comparison Chart")
         if not selected_team:
-            st.caption("Double-click a team on the left to compare.")
+            st.caption("Double-click a team on either table to compare.")
         else:
             show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
                        cell_style=PERCENTILE_STYLE, height=175)
-
-# Row 2: advanced tables side by side (aligned because they start their own column row)
-row2_left, row2_right = st.columns(2)
-
-with row2_left:
-    st.caption("Advanced Stats")
-    show_table(adv_df)
 
 with row2_right:
     if view == "Stats" and selected_team:
         st.caption("Advanced Stats")
         show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
                    cell_style=PERCENTILE_STYLE, height=175)
+
+# ── Net rating trend (full width, below all tables) ──────────────────────────
+st.divider()
+if selected_team and selected_team in weekly.get("teams", {}):
+    st.subheader(f"{selected_team} — Net Rating Over Time")
+    st.caption("Cumulative season-to-date net rating by week, vs. the league average.")
+    chart_df = pd.DataFrame({
+        "Week": weekly["weeks"],
+        selected_team: weekly["teams"][selected_team],
+        "League Average": weekly["league_avg"],
+    }).set_index("Week")
+    st.line_chart(chart_df)
+else:
+    st.caption("Double-click a team above to see its net rating trend over the season.")

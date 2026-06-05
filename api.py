@@ -1,43 +1,39 @@
 import os
 import json
-from fastapi import FastAPI
-from analytics.BuildAverageTeam import BuildAverageTeam
-from analytics.GetTeamStats import GetTeamStats
-from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
+from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 
+# This API never calls nba_api directly. All nba_api access happens once per day
+# in scripts/precompute.py, which writes the JSON files served here. If a file is
+# missing, the data simply hasn't been precomputed yet.
+
 
 def _cached(filename):
-    """Return precomputed JSON if it exists, else None."""
     path = os.path.join(DATA_DIR, filename)
-    if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
-    return None
+    if not os.path.exists(path):
+        raise HTTPException(status_code=503, detail=f"{filename} has not been precomputed yet")
+    with open(path) as f:
+        return json.load(f)
 
 
 @app.get("/average-team/{season}")
 def average_team(season: str):
-    cached = _cached(f"{season}_average.json")
-    if cached is not None:
-        return cached
-    return BuildAverageTeam(season).to_dict()
+    return _cached(f"{season}_average.json")
 
 
 @app.get("/teams/{season}/advanced")
 def teams_advanced(season: str):
-    cached = _cached(f"{season}_advanced.json")
-    if cached is not None:
-        return cached
-    return GetAdvancedTeamStats(season).to_dict(orient="records")
+    return _cached(f"{season}_advanced.json")
+
+
+@app.get("/teams/{season}/weekly-netrating")
+def teams_weekly_netrating(season: str):
+    return _cached(f"{season}_weekly_netrtg.json")
 
 
 @app.get("/teams/{season}")
 def teams(season: str):
-    cached = _cached(f"{season}_basic.json")
-    if cached is not None:
-        return cached
-    return GetTeamStats(season).to_dict(orient="records")
+    return _cached(f"{season}_basic.json")
