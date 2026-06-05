@@ -262,20 +262,35 @@ if selected_team and selected_team in weekly.get("teams", {}):
     })
     long_df = chart_df.melt("Week", var_name="Series", value_name="Net Rating")
 
+    # Pad the y-axis so the league-average line is never flush against an edge
+    vals = [v for v in weekly["teams"][selected_team] if v is not None]
+    vals += [v for v in weekly["league_avg"] if v is not None]
+    lo, hi = min(vals + [0]), max(vals + [0])
+    pad = max(1.0, (hi - lo) * 0.12)
+    y_domain = [lo - pad, hi + pad]
+
     x_axis = alt.X("Week:Q", title=None,
                    axis=alt.Axis(labelExpr="'Week ' + datum.value", tickMinStep=1))
+    y_axis = alt.Y("Net Rating:Q", title="Net Rating",
+                   scale=alt.Scale(domain=y_domain, nice=False))
 
     lines = (
         alt.Chart(long_df)
-        .mark_line()
+        .mark_line(clip=True)
         .encode(
             x=x_axis,
-            y=alt.Y("Net Rating:Q", title="Net Rating"),
-            color=alt.Color("Series:N", title=None),
+            y=y_axis,
+            color=alt.Color(
+                "Series:N", title=None,
+                scale=alt.Scale(
+                    domain=[selected_team, "League Average"],
+                    range=["#1f77b4", "#e74c3c"],  # team blue, league red
+                ),
+            ),
         )
     )
 
-    # Linear line of best fit for the selected team only
+    # Linear line of best fit for the selected team only (light blue, dashed)
     team_df = (
         chart_df[["Week", selected_team]]
         .dropna()
@@ -284,11 +299,15 @@ if selected_team and selected_team in weekly.get("teams", {}):
     trend = (
         alt.Chart(team_df)
         .transform_regression("Week", "Net Rating")
-        .mark_line(strokeDash=[6, 4], color="#888888")
-        .encode(x=x_axis, y="Net Rating:Q")
+        .mark_line(strokeDash=[6, 4], color="#5dade2", clip=True)  # light blue
+        .encode(x=x_axis, y=y_axis)
     )
 
-    chart = (lines + trend).properties(height=400).configure_view(strokeWidth=0)
+    chart = (
+        (lines + trend)
+        .properties(width="container", height=400, padding={"bottom": 30})
+        .configure_view(strokeWidth=0)
+    )
     st.altair_chart(chart, use_container_width=True)
 else:
     st.caption("Double-click a team above to see its net rating trend over the season.")
