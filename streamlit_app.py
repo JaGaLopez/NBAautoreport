@@ -288,6 +288,7 @@ if selected_team and selected_team in weekly.get("teams", {}):
         .encode(x=x_axis, y="Net Rating:Q")
     )
 
-    st.altair_chart(lines + trend, use_container_width=True)
+    chart = (lines + trend).properties(height=400).configure_view(strokeWidth=0)
+    st.altair_chart(chart, use_container_width=True)
 else:
     st.caption("Double-click a team above to see its net rating trend over the season.")
