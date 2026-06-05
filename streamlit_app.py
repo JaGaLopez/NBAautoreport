@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import altair as alt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from st_aggrid.shared import JsCode
 
@@ -253,11 +254,40 @@ st.divider()
 if selected_team and selected_team in weekly.get("teams", {}):
     st.subheader(f"{selected_team} — Net Rating Over Time")
     st.caption("Cumulative season-to-date net rating by week, vs. the league average.")
+
     chart_df = pd.DataFrame({
-        "Week": weekly["weeks"],
+        "Week": range(1, len(weekly["weeks"]) + 1),
         selected_team: weekly["teams"][selected_team],
         "League Average": weekly["league_avg"],
-    }).set_index("Week")
-    st.line_chart(chart_df)
+    })
+    long_df = chart_df.melt("Week", var_name="Series", value_name="Net Rating")
+
+    x_axis = alt.X("Week:Q", title=None,
+                   axis=alt.Axis(labelExpr="'Week ' + datum.value", tickMinStep=1))
+
+    lines = (
+        alt.Chart(long_df)
+        .mark_line()
+        .encode(
+            x=x_axis,
+            y=alt.Y("Net Rating:Q", title="Net Rating"),
+            color=alt.Color("Series:N", title=None),
+        )
+    )
+
+    # Linear line of best fit for the selected team only
+    team_df = (
+        chart_df[["Week", selected_team]]
+        .dropna()
+        .rename(columns={selected_team: "Net Rating"})
+    )
+    trend = (
+        alt.Chart(team_df)
+        .transform_regression("Week", "Net Rating")
+        .mark_line(strokeDash=[6, 4], color="#888888")
+        .encode(x=x_axis, y="Net Rating:Q")
+    )
+
+    st.altair_chart(lines + trend, use_container_width=True)
 else:
     st.caption("Double-click a team above to see its net rating trend over the season.")
