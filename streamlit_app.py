@@ -5,7 +5,7 @@ import altair as alt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from st_aggrid.shared import JsCode
 
-API_URL = "https://nbaautoreport.jglws.com"
+API_URL = "https://nbastats.jglws.com"
 
 BASIC_COLS = {
     "TEAM_NAME": "Team",
