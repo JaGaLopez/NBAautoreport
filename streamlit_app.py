@@ -121,6 +121,10 @@ def load_data(season):
     adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
     weekly    = requests.get(f"{API_URL}/teams/{season}/weekly-netrating").json()
 
+    # Comebacks are a newer dataset; tolerate it not being precomputed yet.
+    cb_resp   = requests.get(f"{API_URL}/teams/{season}/comebacks")
+    comebacks = cb_resp.json() if cb_resp.ok else {}
+
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
@@ -128,7 +132,7 @@ def load_data(season):
     basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
     adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
 
-    return round_for_display(basic_df), round_for_display(adv_df), weekly
+    return round_for_display(basic_df), round_for_display(adv_df), weekly, comebacks
 
 
 def selected_team_from(result):
@@ -199,7 +203,7 @@ with sel_right:
     view = st.selectbox("View", ["Stats", "Narratives"])
 
 with st.spinner("Loading stats..."):
-    basic_df, adv_df, weekly = load_data(season)
+    basic_df, adv_df, weekly, comebacks = load_data(season)
 
 # ── Layout ──────────────────────────────────────────────────────────────────
 # Create both column rows up front so we can fill them in any order.
@@ -234,7 +238,26 @@ st.session_state["selected_team"]  = selected_team
 # Now render the comparison tables on the right
 with row1_right:
     if view == "Narratives":
-        st.info("Narratives coming soon.")
+        st.caption("Narratives")
+        if not selected_team:
+            st.caption("Double-click a team on either table to see its narratives.")
+        else:
+            info = comebacks.get(selected_team) if isinstance(comebacks, dict) else None
+            count = info.get("count", 0) if isinstance(info, dict) else 0
+            st.metric(f"{selected_team} — 4th Quarter Comebacks", count)
+
+            games = info.get("games", []) if isinstance(info, dict) else []
+            if games:
+                games_df = pd.DataFrame(games)[
+                    ["GAME_DATE", "MATCHUP", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
+                ].rename(columns={
+                    "GAME_DATE": "Date",
+                    "MATCHUP": "Matchup",
+                    "DEFICIT_AFTER_Q3": "Deficit after Q3",
+                    "FINAL_TEAM": "Final",
+                    "FINAL_OPP": "Final (Opp)",
+                })
+                show_table(games_df, height=175)
     else:
         st.caption("Comparison Chart")
         if not selected_team:

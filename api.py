@@ -34,6 +34,11 @@ def teams_weekly_netrating(season: str):
     return _cached(f"{season}_weekly_netrtg.json")
 
 
+@app.get("/teams/{season}/comebacks")
+def teams_comebacks(season: str):
+    return _cached(f"{season}_comebacks.json")
+
+
 @app.get("/teams/{season}")
 def teams(season: str):
     return _cached(f"{season}_basic.json")

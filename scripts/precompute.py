@@ -18,6 +18,7 @@ from analytics.GetTeamStats import GetTeamStats
 from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
+from analytics.GetQ4Comebacks import GetAllTeamsQ4Comebacks
 
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -28,7 +29,7 @@ GAMES_IN_SEASON = 82
 TEAMS_IN_LEAGUE = 30
 
 # Every JSON file a fully-processed season should have
-KINDS = ("basic", "advanced", "average", "weekly_netrtg")
+KINDS = ("basic", "advanced", "average", "weekly_netrtg", "comebacks")
 
 
 def _write(filename, obj):
@@ -80,11 +81,15 @@ def main():
         time.sleep(1)
         weekly = GetWeeklyNetRating(season)
         time.sleep(1)
+        # Expensive: one game-log call per team plus one box score per game.
+        comebacks = GetAllTeamsQ4Comebacks(season)
+        time.sleep(1)
 
         _write(f"{season}_basic.json", basic.to_dict(orient="records"))
         _write(f"{season}_advanced.json", advanced.to_dict(orient="records"))
         _write(f"{season}_average.json", average.to_dict())
         _write(f"{season}_weekly_netrtg.json", weekly)
+        _write(f"{season}_comebacks.json", comebacks)
 
     print(f"Done. Data dir: {DATA_DIR}")
 
