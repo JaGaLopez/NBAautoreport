@@ -73,23 +73,26 @@ def main():
 
         print(f"Processing {season}...")
 
-        basic = GetTeamStats(season)
+        # Write each dataset as soon as it's computed so a failure in a later
+        # (more expensive) step never discards earlier work or blocks the
+        # cheaper files from landing.
+        _write(f"{season}_basic.json", GetTeamStats(season).to_dict(orient="records"))
         time.sleep(1)
-        advanced = GetAdvancedTeamStats(season)
+        _write(f"{season}_advanced.json", GetAdvancedTeamStats(season).to_dict(orient="records"))
         time.sleep(1)
-        average = BuildAverageTeam(season)
+        _write(f"{season}_average.json", BuildAverageTeam(season).to_dict())
         time.sleep(1)
-        weekly = GetWeeklyNetRating(season)
-        time.sleep(1)
-        # Expensive: one game-log call per team plus one box score per game.
-        comebacks = GetAllTeamsQ4Comebacks(season)
+        _write(f"{season}_weekly_netrtg.json", GetWeeklyNetRating(season))
         time.sleep(1)
 
-        _write(f"{season}_basic.json", basic.to_dict(orient="records"))
-        _write(f"{season}_advanced.json", advanced.to_dict(orient="records"))
-        _write(f"{season}_average.json", average.to_dict())
-        _write(f"{season}_weekly_netrtg.json", weekly)
-        _write(f"{season}_comebacks.json", comebacks)
+        # Expensive and network-fragile: one game-log call per team plus one
+        # box score per game (~1,200 calls). Isolate it so a failure here
+        # doesn't abort the whole run — the other files are already written.
+        try:
+            _write(f"{season}_comebacks.json", GetAllTeamsQ4Comebacks(season))
+        except Exception as e:
+            print(f"  WARNING: comebacks failed for {season}: {e}")
+        time.sleep(1)
 
     print(f"Done. Data dir: {DATA_DIR}")
 

@@ -122,8 +122,10 @@ def load_data(season):
     weekly    = requests.get(f"{API_URL}/teams/{season}/weekly-netrating").json()
 
     # Comebacks are a newer dataset; tolerate it not being precomputed yet.
+    # None signals "unavailable" so the UI can distinguish a missing file from
+    # a team that genuinely had zero comebacks.
     cb_resp   = requests.get(f"{API_URL}/teams/{season}/comebacks")
-    comebacks = cb_resp.json() if cb_resp.ok else {}
+    comebacks = cb_resp.json() if cb_resp.ok else None
 
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
@@ -241,6 +243,8 @@ with row1_right:
         st.caption("Narratives")
         if not selected_team:
             st.caption("Double-click a team on either table to see its narratives.")
+        elif comebacks is None:
+            st.info("Comeback data isn't available for this season yet.")
         else:
             info = comebacks.get(selected_team) if isinstance(comebacks, dict) else None
             count = info.get("count", 0) if isinstance(info, dict) else 0

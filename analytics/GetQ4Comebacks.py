@@ -4,6 +4,40 @@ from nba_api.stats.endpoints import teamgamelog, boxscoresummaryv2
 from nba_api.stats.static import teams as nba_teams
 
 
+def _fetch_line_score(game_id, retries=3, pause=0.6):
+    """Fetch a game's LineScore frame, retrying transient nba_api failures.
+
+    Returns the DataFrame, or None if it can't be fetched. A single dropped
+    call (rate limit / timeout) is common when running from a server IP, and
+    must not abort an entire season's worth of box scores.
+    """
+    for attempt in range(retries):
+        try:
+            return boxscoresummaryv2.BoxScoreSummaryV2(
+                game_id=game_id
+            ).get_data_frames()[5]
+        except Exception:
+            if attempt == retries - 1:
+                return None
+            time.sleep(pause * (attempt + 2))
+    return None
+
+
+def _fetch_game_log(team_id, season, retries=3, pause=0.6):
+    """Fetch a team's regular-season game log, retrying transient failures."""
+    for attempt in range(retries):
+        try:
+            return teamgamelog.TeamGameLog(
+                team_id=team_id,
+                season=season,
+                season_type_all_star="Regular Season",
+            ).get_data_frames()[0]
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            time.sleep(pause * (attempt + 2))
+
+
 def _resolve_team_id(team_identifier):
     all_teams = nba_teams.get_teams()
     if isinstance(team_identifier, int):
@@ -106,11 +140,7 @@ def GetAllTeamsQ4Comebacks(SEASON):
     # Gather every unique game id in the season from each team's game log.
     game_ids = set()
     for t in all_teams:
-        gl = teamgamelog.TeamGameLog(
-            team_id=t["id"],
-            season=SEASON,
-            season_type_all_star="Regular Season",
-        ).get_data_frames()[0]
+        gl = _fetch_game_log(t["id"], SEASON)
         game_ids.update(gl["Game_ID"].tolist())
         time.sleep(0.6)
 
@@ -119,11 +149,10 @@ def GetAllTeamsQ4Comebacks(SEASON):
     for game_id in sorted(game_ids):
         time.sleep(0.6)
 
-        line_score = boxscoresummaryv2.BoxScoreSummaryV2(
-            game_id=game_id
-        ).get_data_frames()[5]
-
-        if len(line_score) < 2:
+        line_score = _fetch_line_score(game_id)
+        # Skip games whose box score can't be fetched rather than aborting the
+        # whole season — a partial-but-real result is far better than no file.
+        if line_score is None or len(line_score) < 2:
             continue
 
         a, b = line_score.iloc[0], line_score.iloc[1]
