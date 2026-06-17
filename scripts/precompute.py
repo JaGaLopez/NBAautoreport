@@ -65,34 +65,51 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
     for season in SEASONS:
+        complete = _season_complete(season)
+
         # Skip finished seasons only if every file is already stored (so new
         # datasets like weekly net rating get backfilled once for old seasons).
-        if _season_complete(season) and _has_all_files(season):
+        if complete and _has_all_files(season):
             print(f"Skipping {season} (all 82 games played, already stored)")
             continue
 
         print(f"Processing {season}...")
 
+        # For a finished season, only (re)compute the files that are actually
+        # missing. An in-progress season changes daily, so recompute everything.
+        # This is critical: it stops a season that's merely missing the newer
+        # comebacks file from re-fetching the stable datasets every run, where a
+        # single throttled nba_api timeout would crash before comebacks runs.
+        def need(kind):
+            if not complete:
+                return True
+            return not os.path.exists(os.path.join(DATA_DIR, f"{season}_{kind}.json"))
+
         # Write each dataset as soon as it's computed so a failure in a later
         # (more expensive) step never discards earlier work or blocks the
         # cheaper files from landing.
-        _write(f"{season}_basic.json", GetTeamStats(season).to_dict(orient="records"))
-        time.sleep(1)
-        _write(f"{season}_advanced.json", GetAdvancedTeamStats(season).to_dict(orient="records"))
-        time.sleep(1)
-        _write(f"{season}_average.json", BuildAverageTeam(season).to_dict())
-        time.sleep(1)
-        _write(f"{season}_weekly_netrtg.json", GetWeeklyNetRating(season))
-        time.sleep(1)
+        if need("basic"):
+            _write(f"{season}_basic.json", GetTeamStats(season).to_dict(orient="records"))
+            time.sleep(1)
+        if need("advanced"):
+            _write(f"{season}_advanced.json", GetAdvancedTeamStats(season).to_dict(orient="records"))
+            time.sleep(1)
+        if need("average"):
+            _write(f"{season}_average.json", BuildAverageTeam(season).to_dict())
+            time.sleep(1)
+        if need("weekly_netrtg"):
+            _write(f"{season}_weekly_netrtg.json", GetWeeklyNetRating(season))
+            time.sleep(1)
 
         # Expensive and network-fragile: one game-log call per team plus one
         # box score per game (~1,200 calls). Isolate it so a failure here
         # doesn't abort the whole run — the other files are already written.
-        try:
-            _write(f"{season}_comebacks.json", GetAllTeamsQ4Comebacks(season))
-        except Exception as e:
-            print(f"  WARNING: comebacks failed for {season}: {e}")
-        time.sleep(1)
+        if need("comebacks"):
+            try:
+                _write(f"{season}_comebacks.json", GetAllTeamsQ4Comebacks(season))
+            except Exception as e:
+                print(f"  WARNING: comebacks failed for {season}: {e}")
+            time.sleep(1)
 
     print(f"Done. Data dir: {DATA_DIR}")
 

@@ -4,7 +4,12 @@ from nba_api.stats.endpoints import teamgamelog, boxscoresummaryv2
 from nba_api.stats.static import teams as nba_teams
 
 
-def _fetch_line_score(game_id, retries=3, pause=0.6):
+# nba_api defaults to a 30s read timeout; stats.nba.com throttles datacenter
+# IPs, so give each call more room and retry with exponential backoff.
+_TIMEOUT = 60
+
+
+def _fetch_line_score(game_id, retries=4, pause=1.0):
     """Fetch a game's LineScore frame, retrying transient nba_api failures.
 
     Returns the DataFrame, or None if it can't be fetched. A single dropped
@@ -14,28 +19,35 @@ def _fetch_line_score(game_id, retries=3, pause=0.6):
     for attempt in range(retries):
         try:
             return boxscoresummaryv2.BoxScoreSummaryV2(
-                game_id=game_id
+                game_id=game_id, timeout=_TIMEOUT
             ).get_data_frames()[5]
         except Exception:
             if attempt == retries - 1:
                 return None
-            time.sleep(pause * (attempt + 2))
+            time.sleep(pause * 2 ** attempt)
     return None
 
 
-def _fetch_game_log(team_id, season, retries=3, pause=0.6):
-    """Fetch a team's regular-season game log, retrying transient failures."""
+def _fetch_game_log(team_id, season, retries=4, pause=1.0):
+    """Fetch a team's regular-season game log, retrying transient failures.
+
+    Returns the DataFrame, or None if it can't be fetched. Skipping a failed
+    log loses almost nothing: every game appears in *both* teams' logs, so the
+    other 29 logs still surface nearly all game ids.
+    """
     for attempt in range(retries):
         try:
             return teamgamelog.TeamGameLog(
                 team_id=team_id,
                 season=season,
                 season_type_all_star="Regular Season",
+                timeout=_TIMEOUT,
             ).get_data_frames()[0]
         except Exception:
             if attempt == retries - 1:
-                raise
-            time.sleep(pause * (attempt + 2))
+                return None
+            time.sleep(pause * 2 ** attempt)
+    return None
 
 
 def _resolve_team_id(team_identifier):
@@ -141,6 +153,8 @@ def GetAllTeamsQ4Comebacks(SEASON):
     game_ids = set()
     for t in all_teams:
         gl = _fetch_game_log(t["id"], SEASON)
+        if gl is None:
+            continue
         game_ids.update(gl["Game_ID"].tolist())
         time.sleep(0.6)
 
