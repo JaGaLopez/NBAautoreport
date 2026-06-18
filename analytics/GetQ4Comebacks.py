@@ -50,6 +50,20 @@ def _fetch_game_log(team_id, season, retries=4, pause=1.0):
     return None
 
 
+def _pts_after_q3(row):
+    """Sum of a team's first three quarters, or None if any are missing.
+
+    BoxScoreSummaryV2 has a known data-availability gap (notably games on or
+    after 4/10/2025): the LineScore row is present but its PTS_QTR* values come
+    back as None/NaN. Those games can't be classified as comebacks, so callers
+    skip them instead of crashing on `None + None`.
+    """
+    qtrs = (row["PTS_QTR1"], row["PTS_QTR2"], row["PTS_QTR3"])
+    if any(q is None or pd.isna(q) for q in qtrs):
+        return None
+    return qtrs[0] + qtrs[1] + qtrs[2]
+
+
 def _resolve_team_id(team_identifier):
     all_teams = nba_teams.get_teams()
     if isinstance(team_identifier, int):
@@ -99,8 +113,10 @@ def GetQ4Comebacks(team_identifier, SEASON):
         team = team_row.iloc[0]
         opp = opp_row.iloc[0]
 
-        team_after_q3 = team["PTS_QTR1"] + team["PTS_QTR2"] + team["PTS_QTR3"]
-        opp_after_q3 = opp["PTS_QTR1"] + opp["PTS_QTR2"] + opp["PTS_QTR3"]
+        team_after_q3 = _pts_after_q3(team)
+        opp_after_q3 = _pts_after_q3(opp)
+        if team_after_q3 is None or opp_after_q3 is None:
+            continue
 
         if team_after_q3 < opp_after_q3 and team["PTS"] > opp["PTS"]:
             comebacks.append(
@@ -170,10 +186,16 @@ def GetAllTeamsQ4Comebacks(SEASON):
             continue
 
         a, b = line_score.iloc[0], line_score.iloc[1]
-        for team, opp in ((a, b), (b, a)):
-            team_after_q3 = team["PTS_QTR1"] + team["PTS_QTR2"] + team["PTS_QTR3"]
-            opp_after_q3 = opp["PTS_QTR1"] + opp["PTS_QTR2"] + opp["PTS_QTR3"]
+        a_q3, b_q3 = _pts_after_q3(a), _pts_after_q3(b)
+        # Skip games with incomplete quarter data rather than crashing on the
+        # arithmetic; they can't be classified either way.
+        if a_q3 is None or b_q3 is None:
+            continue
 
+        for team, opp, team_after_q3, opp_after_q3 in (
+            (a, b, a_q3, b_q3),
+            (b, a, b_q3, a_q3),
+        ):
             if team_after_q3 < opp_after_q3 and team["PTS"] > opp["PTS"]:
                 name = id_to_name.get(team["TEAM_ID"])
                 if name is None:
