@@ -120,9 +120,19 @@ def round_for_display(df):
 
 @st.cache_data(ttl=86400)
 def load_data(season):
-    basic_raw = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}").json())
-    adv_raw   = pd.DataFrame(requests.get(f"{API_URL}/teams/{season}/advanced").json())
-    weekly    = requests.get(f"{API_URL}/teams/{season}/weekly-netrating").json()
+    basic_resp  = requests.get(f"{API_URL}/teams/{season}")
+    adv_resp    = requests.get(f"{API_URL}/teams/{season}/advanced")
+    weekly_resp = requests.get(f"{API_URL}/teams/{season}/weekly-netrating")
+
+    # The core datasets must all be present. If any is still being precomputed
+    # the API returns a 503 error payload (a scalar dict); signal the caller
+    # rather than letting pd.DataFrame choke on it and crash the whole page.
+    if not (basic_resp.ok and adv_resp.ok and weekly_resp.ok):
+        return None
+
+    basic_raw = pd.DataFrame(basic_resp.json())
+    adv_raw   = pd.DataFrame(adv_resp.json())
+    weekly    = weekly_resp.json()
 
     # Comebacks are a newer dataset; tolerate it not being precomputed yet.
     # None signals "unavailable" so the UI can distinguish a missing file from
@@ -244,7 +254,13 @@ with sel_right:
     view = st.selectbox("View", ["Stats", "Narratives"])
 
 with st.spinner("Loading stats..."):
-    basic_df, adv_df, weekly, comebacks = load_data(season)
+    data = load_data(season)
+
+if data is None:
+    st.warning(f"Stats for {season} haven't been precomputed yet. Try another season.")
+    st.stop()
+
+basic_df, adv_df, weekly, comebacks = data
 
 # ── Layout ──────────────────────────────────────────────────────────────────
 # Create both column rows up front so we can fill them in any order.
