@@ -47,7 +47,7 @@ function(params) {
 DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
 
-def show_table(df, *, double_click=False, cell_style=None, height=None):
+def show_table(df, *, double_click=False, cell_style=None, height=None, col_widths=None):
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_grid_options(suppressMovableColumns=True)
 
@@ -79,11 +79,14 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
         col.update(no_filter)
         field = col.get("field")
         if field in df.columns:
-            longest = max([len(str(field))] + [len(str(v)) for v in df[field].tolist()])
-            if pd.api.types.is_numeric_dtype(df[field]):
-                w = max(60, longest * 9 + 26)
-            else:  # text columns (Team / Metric) use a tighter proportional width
-                w = max(60, longest * 6 + 4)
+            if col_widths and field in col_widths:
+                w = col_widths[field]  # caller-specified fixed width
+            else:
+                longest = max([len(str(field))] + [len(str(v)) for v in df[field].tolist()])
+                if pd.api.types.is_numeric_dtype(df[field]):
+                    w = max(60, longest * 9 + 26)
+                else:  # text columns (Team / Metric) use a tighter proportional width
+                    w = max(60, longest * 6 + 4)
             col["width"] = w
             col["minWidth"] = w
             col["maxWidth"] = w
@@ -175,6 +178,42 @@ def build_comparison(df, team_name, lower_is_better_set):
     return comp.reset_index()
 
 
+def render_comeback_narrative(team_count, league_avg, games):
+    """Render the 4th-quarter-comebacks narrative: league-average headline with
+    the selected team's deviation, followed by its comeback games."""
+    st.metric(
+        "4th Quarter Comebacks · League Avg",
+        round(league_avg, 1),
+        delta=round(team_count - league_avg, 1),
+    )
+
+    if not games:
+        return
+
+    games_df = pd.DataFrame(games)
+    games_df["Date"] = pd.to_datetime(games_df["GAME_DATE"]).dt.strftime("%m/%d")
+    # Strip the selected team's own abbreviation, leaving just the opponent.
+    games_df["Opponent"] = games_df["MATCHUP"].str.split("vs.").str[-1].str.strip()
+    games_df = games_df[
+        ["Date", "Opponent", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
+    ].rename(columns={
+        "DEFICIT_AFTER_Q3": "Q3 Deficit",
+        "FINAL_TEAM": "Final",
+        "FINAL_OPP": "Final (Opp)",
+    })
+    show_table(
+        games_df,
+        height=175,
+        col_widths={
+            "Date": 70,
+            "Opponent": 220,   # lots of room so the opponent is clearly visible
+            "Q3 Deficit": 100,
+            "Final": 80,
+            "Final (Opp)": 80,  # matched to Final
+        },
+    )
+
+
 # ── Page setup ──────────────────────────────────────────────────────────────
 st.set_page_config(layout="wide")
 
@@ -246,22 +285,22 @@ with row1_right:
         elif comebacks is None:
             st.info("Comeback data isn't available for this season yet.")
         else:
-            info = comebacks.get(selected_team) if isinstance(comebacks, dict) else None
-            count = info.get("count", 0) if isinstance(info, dict) else 0
-            st.metric(f"{selected_team} — 4th Quarter Comebacks", count)
+            cb_teams = comebacks.get("teams", {}) if isinstance(comebacks, dict) else {}
+            cb_avg   = comebacks.get("league_average", 0) if isinstance(comebacks, dict) else 0
+            cb_info  = cb_teams.get(selected_team) or {}
+            cb_count = cb_info.get("count", 0)
 
-            games = info.get("games", []) if isinstance(info, dict) else []
-            if games:
-                games_df = pd.DataFrame(games)[
-                    ["GAME_DATE", "MATCHUP", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
-                ].rename(columns={
-                    "GAME_DATE": "Date",
-                    "MATCHUP": "Matchup",
-                    "DEFICIT_AFTER_Q3": "Deficit after Q3",
-                    "FINAL_TEAM": "Final",
-                    "FINAL_OPP": "Final (Opp)",
-                })
-                show_table(games_df, height=175)
+            # Each narrative stat is rendered in its own encapsulated container,
+            # ordered top-to-bottom by how far the team sits from the league avg.
+            narratives = [{
+                "distinctness": abs(cb_count - cb_avg),
+                "render": lambda: render_comeback_narrative(
+                    cb_count, cb_avg, cb_info.get("games", [])
+                ),
+            }]
+            for n in sorted(narratives, key=lambda x: x["distinctness"], reverse=True):
+                with st.container(border=True):
+                    n["render"]()
     else:
         st.caption("Comparison Chart")
         if not selected_team:

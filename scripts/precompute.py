@@ -61,6 +61,20 @@ def _has_all_files(season):
     )
 
 
+def _comebacks_current(season):
+    """True if the stored comebacks file uses the {league_average, teams} shape.
+
+    Older files were a plain team-keyed dict; those must be regenerated so the
+    UI can read league_average and rank narrative stats.
+    """
+    path = os.path.join(DATA_DIR, f"{season}_comebacks.json")
+    if not os.path.exists(path):
+        return False
+    with open(path) as f:
+        data = json.load(f)
+    return isinstance(data, dict) and "league_average" in data
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -68,8 +82,9 @@ def main():
         complete = _season_complete(season)
 
         # Skip finished seasons only if every file is already stored (so new
-        # datasets like weekly net rating get backfilled once for old seasons).
-        if complete and _has_all_files(season):
+        # datasets like weekly net rating get backfilled once for old seasons)
+        # and the comebacks file is the current shape.
+        if complete and _has_all_files(season) and _comebacks_current(season):
             print(f"Skipping {season} (all 82 games played, already stored)")
             continue
 
@@ -84,6 +99,11 @@ def main():
             if not complete:
                 return True
             return not os.path.exists(os.path.join(DATA_DIR, f"{season}_{kind}.json"))
+
+        def need_comebacks():
+            # Regenerate when missing or when the stored file predates the
+            # {league_average, teams} shape.
+            return not complete or not _comebacks_current(season)
 
         # Write each dataset as soon as it's computed so a failure in a later
         # (more expensive) step never discards earlier work or blocks the
@@ -104,7 +124,7 @@ def main():
         # Expensive and network-fragile: one game-log call per team plus one
         # box score per game (~1,200 calls). Isolate it so a failure here
         # doesn't abort the whole run — the other files are already written.
-        if need("comebacks"):
+        if need_comebacks():
             try:
                 _write(f"{season}_comebacks.json", GetAllTeamsQ4Comebacks(season))
             except Exception as e:

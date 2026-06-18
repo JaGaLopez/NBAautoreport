@@ -149,18 +149,24 @@ def GetAllTeamsQ4Comebacks(SEASON):
     over all 30 teams. Same comeback rule: trailing after three quarters but
     winning the game.
 
-    Returns a dict keyed by team full name (matching TEAM_NAME used elsewhere):
+    Returns:
         {
-            "Atlanta Hawks": {
-                "count": 3,
-                "games": [
-                    {"GAME_ID": "...", "GAME_DATE": "...", "MATCHUP": "ATL vs. BOS",
-                     "DEFICIT_AFTER_Q3": 8, "FINAL_TEAM": 110, "FINAL_OPP": 105},
-                    ...
-                ],
+            "league_average": 2.4,   # mean comeback count across all 30 teams
+            "teams": {
+                "Atlanta Hawks": {
+                    "count": 3,
+                    "games": [
+                        {"GAME_ID": "...", "GAME_DATE": "...", "MATCHUP": "ATL vs. BOS",
+                         "DEFICIT_AFTER_Q3": 8, "FINAL_TEAM": 110, "FINAL_OPP": 105},
+                        ...
+                    ],
+                },
+                ...
             },
-            ...
         }
+
+    The league average lets the UI rank "narrative" stats by how far a team
+    sits from the rest of the league.
     """
     all_teams = nba_teams.get_teams()
     id_to_name = {t["id"]: t["full_name"] for t in all_teams}
@@ -212,4 +218,6 @@ def GetAllTeamsQ4Comebacks(SEASON):
                     }
                 )
 
-    return results
+    counts = [r["count"] for r in results.values()]
+    league_average = round(sum(counts) / len(counts), 2) if counts else 0
+    return {"league_average": league_average, "teams": results}
