@@ -223,6 +223,15 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     if not games:
         return
 
+    # Biggest comeback this season: the largest Q3 deficit this team erased.
+    biggest = max(games, key=lambda g: g["DEFICIT_AFTER_Q3"])
+    big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
+    big_date = pd.to_datetime(biggest["GAME_DATE"]).strftime("%m/%d")
+    st.caption(
+        f"🔥 Biggest comeback this season — erased a "
+        f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp} on {big_date}."
+    )
+
     games_df = pd.DataFrame(games)
     games_df["Date"] = pd.to_datetime(games_df["GAME_DATE"]).dt.strftime("%m/%d")
     # Strip the selected team's own abbreviation, leaving just the opponent.
