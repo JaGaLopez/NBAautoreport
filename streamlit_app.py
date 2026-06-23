@@ -50,9 +50,11 @@ function(params) {
 DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
 
-def show_table(df, *, double_click=False, cell_style=None, height=None, col_widths=None):
+def show_table(df, *, double_click=False, cell_style=None, height=None):
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_grid_options(suppressMovableColumns=True)
+    # suppressColumnVirtualisation so every column (even off-screen ones on wide
+    # tables) gets measured and autosized to its content.
+    gb.configure_grid_options(suppressMovableColumns=True, suppressColumnVirtualisation=True)
 
     if cell_style is not None:
         gb.configure_default_column(resizable=True, sortable=False, cellStyle=cell_style)
@@ -76,28 +78,18 @@ def show_table(df, *, double_click=False, cell_style=None, height=None, col_widt
     }
     go.setdefault("defaultColDef", {}).update(no_filter)
 
-    # Lock each column to a deterministic width sized to its header + cell content.
-    # Wide tables scroll horizontally; nothing clips, nothing over-expands.
+    # Just suppress the filter UI per column; widths are handled by AG Grid's
+    # autoSizeStrategy below, which grows/shrinks each column to fit its longest
+    # entry instead of a hand-rolled width estimate.
     for col in go.get("columnDefs", []):
         col.update(no_filter)
-        field = col.get("field")
-        if field in df.columns:
-            if col_widths and field in col_widths:
-                w = col_widths[field]  # caller-specified fixed width
-            else:
-                longest = max([len(str(field))] + [len(str(v)) for v in df[field].tolist()])
-                if pd.api.types.is_numeric_dtype(df[field]):
-                    w = max(60, longest * 9 + 26)
-                else:  # text columns (Team / Metric) use a tighter proportional width
-                    w = max(60, longest * 6 + 4)
-            col["width"] = w
-            col["minWidth"] = w
-            col["maxWidth"] = w
+
+    # fitCellContents = size every column to its content (header + longest cell).
+    go["autoSizeStrategy"] = {"type": "fitCellContents"}
 
     kwargs = dict(
         gridOptions=go,
         allow_unsafe_jscode=True,
-        use_container_width=True,
         update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
     )
     if height is not None:
@@ -212,7 +204,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     team's comeback games."""
     st.metric(
         "Total Comebacks vs. League Avg",
-        team_count,
+        f"{team_count} vs. {round(league_avg, 1)}",
         delta=round(team_count - league_avg, 1),
     )
 
@@ -242,17 +234,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         "FINAL_TEAM": "Final",
         "FINAL_OPP": "Final (Opp)",
     })
-    show_table(
-        games_df,
-        height=175,
-        col_widths={
-            "Date": 70,
-            "Opponent": 220,   # lots of room so the opponent is clearly visible
-            "Q3 Deficit": 100,
-            "Final": 80,
-            "Final (Opp)": 80,  # matched to Final
-        },
-    )
+    show_table(games_df, height=175)
 
 
 # ── Page setup ──────────────────────────────────────────────────────────────
@@ -282,7 +264,7 @@ sel_left, sel_right = st.columns(2)
 with sel_left:
     season = st.selectbox("Season", SEASONS)
 with sel_right:
-    view = st.selectbox("View", ["Stats", "Narratives"])
+    view = st.selectbox("View", ["Narratives", "Stats"])
 
 with st.spinner("Loading stats..."):
     data = load_data(season)
