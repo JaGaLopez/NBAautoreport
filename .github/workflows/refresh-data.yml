@@ -1,0 +1,37 @@
+name: Refresh data
+
+# Runs scripts/precompute.py to refresh the JSON the API serves. Decoupled from
+# deploys so a code push never kicks off the slow (~hours) comebacks crawl.
+#
+# Precompute runs in a one-shot container against the shared data volume, so it
+# is independent of the live API container: a deploy mid-refresh won't kill it,
+# and the API keeps serving the previous data until the new files land (it reads
+# the JSON fresh on each request).
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # daily at 11:00 UTC — adjust as desired
+  workflow_dispatch:
+
+# Never run two refreshes at once, and let an in-flight one finish (don't cancel
+# — precompute is long and makes a fresh run pointless to interrupt).
+concurrency:
+  group: refresh-nbaautoreport
+  cancel-in-progress: false
+
+env:
+  DATA_HOST: /mnt/user/appdata/nbaautoreport/data
+
+jobs:
+  refresh:
+    runs-on: [self-hosted]
+    steps:
+      # Uses the nbaautoreport image built by the most recent deploy, so it runs
+      # whatever code is currently live. (Deploy must have run at least once.)
+      - name: Run precompute (one-shot container, shared data volume)
+        run: |
+          mkdir -p "$DATA_HOST"
+          docker run --rm \
+            -v "$DATA_HOST":/app/data \
+            -e DATA_DIR=/app/data -e PYTHONPATH=/app -w /app \
+            nbaautoreport python scripts/precompute.py

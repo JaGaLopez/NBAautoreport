@@ -1,0 +1,50 @@
+name: Deploy
+
+# Build the images and (re)start the containers on every push to main.
+# Data is intentionally NOT touched here — see refresh-data.yml. Keeping deploy
+# and data-refresh separate means a code push is fast and never triggers the
+# slow (~hours) comeback precompute.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only one deploy at a time; a newer push cancels an in-flight one. This is what
+# the old webhook lacked — overlapping deploys used to stomp on each other.
+concurrency:
+  group: deploy-nbaautoreport
+  cancel-in-progress: true
+
+env:
+  # Single, persistent host directory the API serves from (Unraid share).
+  DATA_HOST: /mnt/user/appdata/nbaautoreport/data
+
+jobs:
+  deploy:
+    runs-on: [self-hosted]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -f Dockerfile -t nbaautoreport .
+
+      - name: (Re)start API container
+        run: |
+          mkdir -p "$DATA_HOST"
+          docker rm -f nbaautoreport || true
+          docker run -d --name nbaautoreport --restart unless-stopped \
+            -p 8000:8000 \
+            -v "$DATA_HOST":/app/data \
+            -e DATA_DIR=/app/data \
+            nbaautoreport
+
+      - name: Build Streamlit image
+        run: docker build -f Dockerfile.streamlit -t nbastats .
+
+      - name: (Re)start Streamlit container
+        run: |
+          docker rm -f nbastats || true
+          docker run -d --name nbastats --restart unless-stopped \
+            -p 8501:8501 \
+            nbastats
