@@ -1,9 +1,9 @@
 # Deployment
 
 This project is self-hosted on an Unraid server and deployed with a **GitHub
-Actions self-hosted runner**. It replaces an earlier custom webhook
-(`webhook_server.py` + `scripts/update.sh`), which had no concurrency control and
-re-ran the slow data precompute on every code push.
+Actions self-hosted runner**. It replaced an earlier custom webhook (since
+removed), which had no concurrency control and re-ran the slow data precompute on
+every code push.
 
 ## Two workflows
 
@@ -57,8 +57,6 @@ registration token is configured at runner setup, not in the workflow).
    containers come up and `https://nbastats.jglws.com/teams/2024-25` returns 200.
 3. If `/mnt/user/appdata/nbaautoreport/data` were ever empty, run **Refresh data**
    once manually to populate it. (It is currently populated, so this is a no-op.)
-4. Once a deploy via the runner is verified, **decommission the webhook**:
-   stop/remove the `nbaautoreport-webhook` container and disable its autostart, and
-   optionally delete the push webhook in the repo's GitHub settings.
-5. After that, `webhook_server.py`, `Dockerfile.webhook`, and `scripts/update.sh`
-   can be deleted from the repo (kept for now as a rollback path).
+4. The webhook code has been removed from the repo. To finish decommissioning on
+   the server: stop/remove the `nbaautoreport-webhook` container and disable its
+   autostart, and optionally delete the push webhook in the repo's GitHub settings.
