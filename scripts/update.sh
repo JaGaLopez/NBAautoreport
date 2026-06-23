@@ -2,7 +2,13 @@
 set -e
 
 REPO="${REPO_PATH:-/mnt/user/websites/NBAautoreport}"
-DATA_HOST="$REPO/data"
+
+# Host path for the precomputed JSON the API serves. This MUST be an absolute
+# path on the Docker host: the `-v` source below is resolved by the host daemon,
+# not inside this (webhook) container, so it must not be derived from $REPO
+# (which is the in-container checkout path, e.g. /repo). Keep it on a persistent
+# Unraid share so it survives container rebuilds and reboots.
+DATA_HOST="${DATA_HOST_PATH:-/mnt/user/appdata/nbaautoreport/data}"
 mkdir -p "$DATA_HOST"
 
 cd "$REPO"
