@@ -228,7 +228,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
     big_date = pd.to_datetime(biggest["GAME_DATE"]).strftime("%m/%d")
     st.caption(
-        f"🔥 Biggest comeback this season — erased a "
+        f"Biggest comeback this season:"
         f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp} on {big_date}."
     )
 
