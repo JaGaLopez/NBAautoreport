@@ -7,6 +7,9 @@ from st_aggrid.shared import JsCode
 
 API_URL = "https://nbastats.jglws.com"
 
+# Newest first; also the set of seasons used for "historic low" comparisons.
+SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
+
 BASIC_COLS = {
     "TEAM_NAME": "Team",
     "FGM": "FG", "FGA": "FGA", "FG_PCT": "FG%",
@@ -188,14 +191,42 @@ def build_comparison(df, team_name, lower_is_better_set):
     return comp.reset_index()
 
 
-def render_comeback_narrative(team_count, league_avg, games):
-    """Render the 4th-quarter-comebacks narrative: league-average headline with
-    the selected team's deviation, followed by its comeback games."""
+@st.cache_data(ttl=86400)
+def team_comeback_counts(team_name):
+    """This team's comeback count in every season we have data for: {season: count}.
+    Used to flag a season that's a historic low across our dataset."""
+    counts = {}
+    for s in SEASONS:
+        resp = requests.get(f"{API_URL}/teams/{s}/comebacks")
+        if not resp.ok:
+            continue
+        info = (resp.json().get("teams", {}) or {}).get(team_name)
+        if info is not None:
+            counts[s] = info.get("count", 0)
+    return counts
+
+
+def render_comeback_narrative(team_name, team_count, league_avg, games):
+    """Render the 4th-quarter-comebacks narrative: the team's total vs. the league
+    average (the metric's arrow shows the gap), with a historic-low note and the
+    team's comeback games."""
     st.metric(
-        "4th Quarter Comebacks · League Avg",
-        round(league_avg, 1),
+        "Total Comebacks vs. League Avg",
+        team_count,
         delta=round(team_count - league_avg, 1),
     )
+
+    # Note a season that is (or ties) this team's fewest comebacks across the
+    # seasons we have — only meaningful when there's more than one season and the
+    # counts actually vary.
+    history = team_comeback_counts(team_name)
+    if len(history) > 1:
+        lo, hi = min(history.values()), max(history.values())
+        if team_count == lo < hi:
+            st.caption(
+                f"📉 Historic low — fewest comebacks for {team_name} "
+                f"in our {len(history)} seasons of data."
+            )
 
     if not games:
         return
@@ -249,7 +280,7 @@ with head_right:
 # Dropdowns row (under their respective headers)
 sel_left, sel_right = st.columns(2)
 with sel_left:
-    season = st.selectbox("Season", ["2024-25", "2023-24", "2022-23", "2021-22"])
+    season = st.selectbox("Season", SEASONS)
 with sel_right:
     view = st.selectbox("View", ["Stats", "Narratives"])
 
@@ -311,7 +342,7 @@ with row1_right:
             narratives = [{
                 "distinctness": abs(cb_count - cb_avg),
                 "render": lambda: render_comeback_narrative(
-                    cb_count, cb_avg, cb_info.get("games", [])
+                    selected_team, cb_count, cb_avg, cb_info.get("games", [])
                 ),
             }]
             for n in sorted(narratives, key=lambda x: x["distinctness"], reverse=True):
