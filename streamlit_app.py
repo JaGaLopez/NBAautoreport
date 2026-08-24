@@ -235,14 +235,12 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     average (the metric's arrow shows the gap), with a historic-low note and the
     team's comeback games."""
     st.metric(
-        "Total Comebacks vs. League Avg",
-        f"{team_count} vs. {round(league_avg, 1)}",
+        "Total Comebacks",
+        f"{team_count} vs. {round(league_avg, 1)} League Avg",
         delta=round(team_count - league_avg, 1),
     )
 
-    # Note a season that is (or ties) this team's fewest comebacks across the
-    # seasons we have — only meaningful when there's more than one season and the
-    # counts actually vary.
+
     history = team_comeback_counts(team_name)
     if len(history) > 1:
         lo, hi = min(history.values()), max(history.values())
@@ -297,14 +295,15 @@ def render_effort_narrative(team_name, info, league_avg):
     keeps in losses relative to its own wins, vs. the league average."""
     score = info["effort_retention"]
 
+
     st.metric(
-        "Effort While Losing vs. League Avg",
-        f"{score:.2f} vs. {league_avg:.2f}",
-        delta=round(score - league_avg, 2),
+        "Effort While Losing",
+        f"{score:.0%} vs. {league_avg:.0%} League Avg",
+        delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
     st.caption(
-        "Hustle rate in losses divided by the same team's rate in wins. "
-        "1.00 means they compete the same either way; below that means the "
+        "Share of its winning hustle rate that this team still brings in losses. "
+        "100% means they compete the same either way; below that means the "
         "effort drops off once games go bad."
     )
 
@@ -315,7 +314,7 @@ def render_effort_narrative(team_name, info, league_avg):
         lo, hi = min(history.values()), max(history.values())
         if score == lo < hi:
             st.caption(
-                f"📉 Historic low — least effort in losses for {team_name} "
+                f"Historic low — least effort in losses for {team_name} "
                 f"in our {len(history)} seasons of data."
             )
 
@@ -323,16 +322,17 @@ def render_effort_narrative(team_name, info, league_avg):
     if not components:
         return
 
+    # Kept numeric (not a "%" string) so the grid still sorts these properly.
     comp_df = pd.DataFrame(
         [
-            {"Metric": EFFORT_COMPONENT_LABELS.get(k, k), "Losses ÷ Wins": round(v, 2)}
+            {"Metric": EFFORT_COMPONENT_LABELS.get(k, k), "% of Winning Effort": round(v * 100)}
             for k, v in components.items()
         ]
-    ).sort_values("Losses ÷ Wins")
+    ).sort_values("% of Winning Effort")
     show_table(comp_df, height=175)
 
 
-# ── Page setup ──────────────────────────────────────────────────────────────
+# Page setup 
 st.set_page_config(layout="wide")
 
 st.markdown("""
@@ -342,6 +342,11 @@ st.markdown("""
         border-left: 2px solid #cccccc;
         padding-left: 2rem;
     }
+    /* Narrative cards: the stat's name is the headline, so scale the metric
+       label up and the value down — the value line now carries the "vs. League
+       Avg" comparison text, which is too long for the default 2.25rem. */
+    [data-testid="stMetricLabel"] p { font-size: 1.25rem; font-weight: 600; }
+    [data-testid="stMetricValue"]   { font-size: 1.6rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -370,7 +375,7 @@ if data is None:
 
 basic_df, adv_df, weekly, comebacks, effort = data
 
-# ── Layout ──────────────────────────────────────────────────────────────────
+# Layout 
 # Create both column rows up front so we can fill them in any order.
 row1_left, row1_right = st.columns(2)
 row2_left, row2_right = st.columns(2)
@@ -407,11 +412,7 @@ with row1_right:
         if not selected_team:
             st.caption("Double-click a team on either table to see its narratives.")
         else:
-            # Each narrative stat is rendered in its own encapsulated container,
-            # ordered top-to-bottom by how far the team sits from the league.
-            # Distinctness is a z-score rather than a raw gap so stats on
-            # different scales (comeback counts vs. effort ratios) rank fairly
-            # against each other.
+
             narratives = []
 
             if isinstance(comebacks, dict):
@@ -433,8 +434,7 @@ with row1_right:
                 ef_teams = effort.get("teams", {}) or {}
                 ef_avg   = effort.get("league_average", 0)
                 ef_info  = ef_teams.get(selected_team)
-                # Precompute stores a z_score per team already; fall back to
-                # computing one so an older data file still ranks sensibly.
+
                 if ef_info and ef_info.get("effort_retention") is not None:
                     z = ef_info.get("z_score")
                     if z is None:
@@ -468,7 +468,7 @@ with row2_right:
         show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
                    cell_style=PERCENTILE_STYLE, height=175)
 
-# ── Net rating trend (full width, below all tables) ──────────────────────────
+# ── Net rating trend (full width, below all tables) 
 st.divider()
 if selected_team and selected_team in weekly.get("teams", {}):
     st.subheader(f"{selected_team} — Net Rating Over Time")
