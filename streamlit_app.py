@@ -198,23 +198,6 @@ def build_comparison(df, team_name, lower_is_better_set):
     return comp.reset_index()
 
 
-def zscore_against(value, population):
-    """How many standard deviations `value` sits from its population, absolute.
-
-    Used to rank narrative stats measured on different scales against each
-    other. Returns 0 when there's nothing to compare against or every team is
-    identical, which just sorts that narrative last.
-    """
-    vals = [v for v in population if v is not None]
-    if len(vals) < 2:
-        return 0
-    mean = sum(vals) / len(vals)
-    var  = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1)
-    if var == 0:
-        return 0
-    return abs(value - mean) / var ** 0.5
-
-
 @st.cache_data(ttl=86400)
 def team_comeback_counts(team_name):
     """This team's comeback count in every season we have data for: {season: count}.
@@ -236,7 +219,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     team's comeback games."""
     st.metric(
         "Total Comebacks",
-        f"{team_count} vs. {round(league_avg, 1)} League Avg",
+        f"{team_count} vs. {round(league_avg, 1)} (League Average)",
         delta=round(team_count - league_avg, 1),
     )
 
@@ -246,7 +229,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         lo, hi = min(history.values()), max(history.values())
         if team_count == lo < hi:
             st.caption(
-                f"📉 Historic low — fewest comebacks for {team_name} "
+                f"Historic low, fewest comebacks for {team_name} "
                 f"in our {len(history)} seasons of data."
             )
 
@@ -298,23 +281,22 @@ def render_effort_narrative(team_name, info, league_avg):
 
     st.metric(
         "Effort While Losing",
-        f"{score:.0%} vs. {league_avg:.0%} League Avg",
+        f"{score:.0%} vs. {league_avg:.0%} (league average)",
         delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
     st.caption(
-        "Share of its winning hustle rate that this team still brings in losses. "
         "100% means they compete the same either way; below that means the "
         "effort drops off once games go bad."
     )
 
-    # Flag a season that is (or ties) this team's lowest across our data — only
+    # Flag a season that is (or ties) this team's lowest across our data. Only
     # meaningful with more than one season and scores that actually vary.
     history = team_effort_history(team_name)
     if len(history) > 1:
         lo, hi = min(history.values()), max(history.values())
         if score == lo < hi:
             st.caption(
-                f"Historic low — least effort in losses for {team_name} "
+                f"Historic low, least effort in losses for {team_name} "
                 f"in our {len(history)} seasons of data."
             )
 
@@ -343,7 +325,7 @@ st.markdown("""
         padding-left: 2rem;
     }
     /* Narrative cards: the stat's name is the headline, so scale the metric
-       label up and the value down — the value line now carries the "vs. League
+       label up and the value down. The value line now carries the "vs. League
        Avg" comparison text, which is too long for the default 2.25rem. */
     [data-testid="stMetricLabel"] p { font-size: 1.25rem; font-weight: 600; }
     [data-testid="stMetricValue"]   { font-size: 1.6rem; }
@@ -413,6 +395,9 @@ with row1_right:
             st.caption("Double-click a team on either table to see its narratives.")
         else:
 
+            # Fixed display order, so a team's cards are always in the same
+            # place no matter which team is selected. A narrative is simply
+            # left out when its data is missing.
             narratives = []
 
             if isinstance(comebacks, dict):
@@ -420,15 +405,11 @@ with row1_right:
                 cb_avg   = comebacks.get("league_average", 0)
                 cb_info  = cb_teams.get(selected_team) or {}
                 cb_count = cb_info.get("count", 0)
-                narratives.append({
-                    "distinctness": zscore_against(
-                        cb_count,
-                        [t.get("count", 0) for t in cb_teams.values()],
-                    ),
-                    "render": lambda: render_comeback_narrative(
+                narratives.append(
+                    lambda: render_comeback_narrative(
                         selected_team, cb_count, cb_avg, cb_info.get("games", [])
-                    ),
-                })
+                    )
+                )
 
             if isinstance(effort, dict):
                 ef_teams = effort.get("teams", {}) or {}
@@ -436,24 +417,17 @@ with row1_right:
                 ef_info  = ef_teams.get(selected_team)
 
                 if ef_info and ef_info.get("effort_retention") is not None:
-                    z = ef_info.get("z_score")
-                    if z is None:
-                        z = zscore_against(
-                            ef_info["effort_retention"],
-                            [t["effort_retention"] for t in ef_teams.values()],
-                        )
-                    narratives.append({
-                        "distinctness": abs(z),
-                        "render": lambda: render_effort_narrative(
+                    narratives.append(
+                        lambda: render_effort_narrative(
                             selected_team, ef_info, ef_avg
-                        ),
-                    })
+                        )
+                    )
 
             if not narratives:
                 st.info("Narrative data isn't available for this season yet.")
-            for n in sorted(narratives, key=lambda x: x["distinctness"], reverse=True):
+            for render in narratives:
                 with st.container(border=True):
-                    n["render"]()
+                    render()
     else:
         st.caption("Comparison Chart")
         if not selected_team:
@@ -468,7 +442,7 @@ with row2_right:
         show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
                    cell_style=PERCENTILE_STYLE, height=175)
 
-# ── Net rating trend (full width, below all tables) 
+# Net rating trend (full width, below all tables)
 st.divider()
 if selected_team and selected_team in weekly.get("teams", {}):
     st.subheader(f"{selected_team} — Net Rating Over Time")

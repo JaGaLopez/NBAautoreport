@@ -72,7 +72,7 @@ CORE_DATASETS = (
     ("advanced",      lambda s: GetAdvancedTeamStats(s).to_dict(orient="records")),
     ("average",       lambda s: BuildAverageTeam(s).to_dict()),
     ("weekly_netrtg", lambda s: GetWeeklyNetRating(s)),
-    # Four league-wide calls (hustle + advanced, split W/L) — cheap enough for
+    # Four league-wide calls (hustle + advanced, split W/L), cheap enough for
     # the core pass, unlike the per-game comebacks work below.
     ("effort",        lambda s: GetEffortWhileLosing(s)),
 )

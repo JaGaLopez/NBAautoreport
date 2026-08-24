@@ -127,7 +127,7 @@ def GetEffortWhileLosing(SEASON, SEASON_TYPE="Regular Season"):
             },
         }
 
-    An empty `teams` dict means the source data wasn't available — most likely a
+    An empty `teams` dict means the source data wasn't available, most likely a
     pre-2015-16 season (no hustle tracking) or a season too young for every team
     to have both a win and a loss. Callers should treat that as "skip this
     stat", not as an error.
