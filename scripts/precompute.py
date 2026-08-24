@@ -18,10 +18,11 @@ from analytics.GetTeamStats import GetTeamStats
 from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
-from analytics.GetQ4Comebacks import GetAllTeamsQ4Comebacks
 from analytics.GetEffortWhileLosing import GetEffortWhileLosing
-from analytics.GetHotStarts import GetAllTeamsHotStarts
 from analytics.GetShootingVariance import GetShootingVariance
+from analytics.LineScores import iter_line_scores
+from analytics import GetQ4Comebacks as comebacks
+from analytics import GetHotStarts as hotstarts
 
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -81,12 +82,12 @@ CORE_DATASETS = (
     ("shooting",      lambda s: GetShootingVariance(s)),
 )
 
-# Expensive datasets: each walks one line score per game (~1,200 calls) and can
-# run for the better part of an hour. Both read the same line scores, so if the
-# nightly job ever gets tight, merging them into a single pass is the fix.
+# Datasets built from the season's line scores. They share a single crawl
+# (~1,200 throttled calls, the better part of an hour), so adding another stat
+# here costs computation but no extra API calls.
 CRAWL_DATASETS = (
-    ("comebacks", lambda s: GetAllTeamsQ4Comebacks(s)),
-    ("hotstarts", lambda s: GetAllTeamsHotStarts(s)),
+    ("comebacks", comebacks),
+    ("hotstarts", hotstarts),
 )
 
 
@@ -109,22 +110,33 @@ def main():
                 _write(f"{season}_{kind}.json", compute(season))
                 time.sleep(1)
 
-    # Pass 2, the expensive, network-fragile line score crawls. Each dataset is
-    # isolated per season so a throttled failure on one doesn't starve the rest.
+    # Pass 2, the expensive, network-fragile line score crawl. One walk over the
+    # season feeds every stat built on it, so the cost is the same whether one
+    # dataset is missing or all of them are. Isolated per season so a throttled
+    # failure on one doesn't starve the rest.
     for season in SEASONS:
         complete = _season_complete(season)
-        for kind, compute in CRAWL_DATASETS:
-            # Skip only a finished season already stored in the current
-            # {league_average, teams} shape. Older comeback files were a plain
-            # team-keyed dict and must be regenerated.
-            if complete and _crawl_current(season, kind):
-                continue
-            print(f"Computing {season} {kind}...")
-            try:
-                _write(f"{season}_{kind}.json", compute(season))
-            except Exception as e:
-                print(f"  WARNING: {kind} failed for {season}: {e}")
-            time.sleep(1)
+        # Skip only a finished season whose datasets are all already stored in
+        # the current {league_average, teams} shape. Older comeback files were
+        # a plain team-keyed dict and must be regenerated.
+        pending = [
+            (kind, module) for kind, module in CRAWL_DATASETS
+            if not (complete and _crawl_current(season, kind))
+        ]
+        if not pending:
+            continue
+
+        print(f"Computing {season} {', '.join(k for k, _ in pending)}...")
+        try:
+            tallies = [(kind, module, module.new_tally()) for kind, module in pending]
+            for game_id, line_score in iter_line_scores(season):
+                for _, module, tally in tallies:
+                    module.add_game(tally, game_id, line_score)
+            for kind, module, tally in tallies:
+                _write(f"{season}_{kind}.json", module.finish(tally))
+        except Exception as e:
+            print(f"  WARNING: line score crawl failed for {season}: {e}")
+        time.sleep(1)
 
     print(f"Done. Data dir: {DATA_DIR}")
 

@@ -11,13 +11,12 @@ Cost note: this crawls one line score per game, the same data GetQ4Comebacks
 walks. If the daily refresh gets tight, merging the two into a single pass over
 the season's line scores is the obvious optimization.
 """
-import time
 import pandas as pd
 from nba_api.stats.static import teams as nba_teams
 
-# Reuses the retry/backoff fetchers from the comebacks module rather than
-# duplicating them; both modules need exactly the same throttled calls.
-from analytics.GetQ4Comebacks import _fetch_line_score, _fetch_game_log
+# The line score crawl is shared with the other stats built on it, so one pass
+# over the season can feed all of them. See analytics/LineScores.py.
+from analytics.LineScores import iter_line_scores
 
 
 def _quarter(row, *keys):
@@ -36,81 +35,47 @@ def _quarter(row, *keys):
     return total
 
 
-def GetAllTeamsHotStarts(SEASON):
-    """First-quarter and halftime lead rates for every team in a season.
-
-    Ties are not leads: a team tied after one quarter is counted as not
-    leading, in both the numerator and the conditional.
-
-    Returns:
-        {
-            "league_average": 0.5,       # mean q1_lead_pct across all 30 teams
-            "teams": {
-                "Atlanta Hawks": {
-                    "games": 82,
-                    "q1_leads": 45,
-                    "q1_lead_pct": 0.549,
-                    "h1_leads": 43,
-                    "h1_lead_pct": 0.524,
-                    "h1_lead_after_q1_lead": 36,
-                    "h1_lead_after_q1_lead_pct": 0.8,
-                    "lift_pts": 27.6,    # conditional minus baseline, in points
-                },
-                ...
-            },
-        }
-
-    An empty `teams` dict means no game data could be fetched. Callers should
-    treat that as "skip this stat", not as an error.
-    """
-    all_teams = nba_teams.get_teams()
-    id_to_name = {t["id"]: t["full_name"] for t in all_teams}
-
-    # Gather every unique game id in the season from each team's game log.
-    game_ids = set()
-    for t in all_teams:
-        gl = _fetch_game_log(t["id"], SEASON)
-        if gl is None:
-            continue
-        game_ids.update(gl["Game_ID"].tolist())
-        time.sleep(0.6)
-
-    tally = {
+def new_tally():
+    """Empty accumulator: every team present with zero games."""
+    return {
         t["id"]: {"games": 0, "q1": 0, "h1": 0, "both": 0}
-        for t in all_teams
+        for t in nba_teams.get_teams()
     }
 
-    for game_id in sorted(game_ids):
-        time.sleep(0.6)
 
-        line_score = _fetch_line_score(game_id)
-        # Skip games whose box score can't be fetched rather than aborting the
-        # whole season; a partial but real result beats no file at all.
-        if line_score is None or len(line_score) < 2:
+def add_game(tally, game_id, line_score):
+    """Fold one game's line score into the tally.
+
+    Games with incomplete quarter data are ignored; they can't be classified
+    either way.
+    """
+    a, b = line_score.iloc[0], line_score.iloc[1]
+    a_q1, b_q1 = _quarter(a, "PTS_QTR1"), _quarter(b, "PTS_QTR1")
+    a_h1 = _quarter(a, "PTS_QTR1", "PTS_QTR2")
+    b_h1 = _quarter(b, "PTS_QTR1", "PTS_QTR2")
+    if None in (a_q1, b_q1, a_h1, b_h1):
+        return
+
+    for team, q1, opp_q1, h1, opp_h1 in (
+        (a, a_q1, b_q1, a_h1, b_h1),
+        (b, b_q1, a_q1, b_h1, a_h1),
+    ):
+        row = tally.get(team["TEAM_ID"])
+        if row is None:
             continue
+        # bool()/int() rather than the numpy scalars pandas hands back,
+        # so the tallies stay JSON serializable for precompute.
+        row["games"] += 1
+        led_q1 = bool(q1 > opp_q1)
+        led_h1 = bool(h1 > opp_h1)
+        row["q1"] += int(led_q1)
+        row["h1"] += int(led_h1)
+        row["both"] += int(led_q1 and led_h1)
 
-        a, b = line_score.iloc[0], line_score.iloc[1]
-        a_q1, b_q1 = _quarter(a, "PTS_QTR1"), _quarter(b, "PTS_QTR1")
-        a_h1 = _quarter(a, "PTS_QTR1", "PTS_QTR2")
-        b_h1 = _quarter(b, "PTS_QTR1", "PTS_QTR2")
-        if None in (a_q1, b_q1, a_h1, b_h1):
-            continue
 
-        for team, q1, opp_q1, h1, opp_h1 in (
-            (a, a_q1, b_q1, a_h1, b_h1),
-            (b, b_q1, a_q1, b_h1, a_h1),
-        ):
-            row = tally.get(team["TEAM_ID"])
-            if row is None:
-                continue
-            # bool()/int() rather than the numpy scalars pandas hands back,
-            # so the tallies stay JSON serializable for precompute.
-            row["games"] += 1
-            led_q1 = bool(q1 > opp_q1)
-            led_h1 = bool(h1 > opp_h1)
-            row["q1"] += int(led_q1)
-            row["h1"] += int(led_h1)
-            row["both"] += int(led_q1 and led_h1)
+def finish(tally):
+    """Turn a tally into the stored {league_average, teams} payload."""
+    id_to_name = {t["id"]: t["full_name"] for t in nba_teams.get_teams()}
 
     teams = {}
     for team_id, row in tally.items():
@@ -144,6 +109,43 @@ def GetAllTeamsHotStarts(SEASON):
 
     league_average = sum(t["q1_lead_pct"] for t in teams.values()) / len(teams)
     return {"league_average": round(league_average, 3), "teams": teams}
+
+
+def GetAllTeamsHotStarts(SEASON):
+    """First-quarter and halftime lead rates for every team in a season.
+
+    Ties are not leads: a team tied after one quarter is counted as not
+    leading, in both the numerator and the conditional.
+
+    This runs the line score crawl for this stat alone. The daily precompute
+    instead drives new_tally/add_game/finish directly so one crawl feeds every
+    stat built on line scores.
+
+    Returns:
+        {
+            "league_average": 0.5,       # mean q1_lead_pct across all 30 teams
+            "teams": {
+                "Atlanta Hawks": {
+                    "games": 82,
+                    "q1_leads": 45,
+                    "q1_lead_pct": 0.549,
+                    "h1_leads": 43,
+                    "h1_lead_pct": 0.524,
+                    "h1_lead_after_q1_lead": 36,
+                    "h1_lead_after_q1_lead_pct": 0.8,
+                    "lift_pts": 27.6,    # conditional minus baseline, in points
+                },
+                ...
+            },
+        }
+
+    An empty `teams` dict means no game data could be fetched. Callers should
+    treat that as "skip this stat", not as an error.
+    """
+    tally = new_tally()
+    for game_id, line_score in iter_line_scores(SEASON):
+        add_game(tally, game_id, line_score)
+    return finish(tally)
 
 
 # Guard so importing this module never triggers nba_api calls.

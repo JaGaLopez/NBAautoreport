@@ -295,7 +295,7 @@ def render_effort_narrative(team_name, info, league_avg):
 
     st.metric(
         "Effort While Losing",
-        f"{score:.0%} vs. {league_avg:.0%} (league average)",
+        f"{score:.0%} vs. {league_avg:.0%} (League Average)",
         delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
     st.caption(
