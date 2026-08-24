@@ -243,7 +243,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         lo, hi = min(history.values()), max(history.values())
         if team_count == lo < hi:
             st.caption(
-                f"Historic low, fewest comebacks for {team_name} "
+                f"Historic low: fewest comebacks for {team_name} "
                 f"in our {len(history)} seasons of data."
             )
 
@@ -255,8 +255,8 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
     big_date = pd.to_datetime(biggest["GAME_DATE"]).strftime("%m/%d")
     st.caption(
-        f"Biggest comeback this season:"
-        f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp} on {big_date}."
+        f"Biggest comeback this season: "
+        f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp}."
     )
 
     games_df = pd.DataFrame(games)
