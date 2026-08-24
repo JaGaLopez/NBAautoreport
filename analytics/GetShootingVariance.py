@@ -1,7 +1,7 @@
 """Shooting variance: what a team's shooting should look like, and what it has
 actually looked like lately.
 
-Two halves. The *baseline* is what the season says to expect: efficiency (eFG%),
+Two halves. The baseline is what the season says to expect: efficiency (eFG%),
 volume (attempts per game, three-point rate), and shot quality from tracking
 data, meaning how much of a team's work comes from open and wide-open looks.
 A team that generates open threes in volume is expected to shoot well, and a

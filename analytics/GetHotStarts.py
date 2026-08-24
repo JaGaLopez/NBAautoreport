@@ -5,8 +5,7 @@ lead actually holds. Every team leads at half more often when it led after one
 quarter, since the first quarter is part of the half, so the raw pairing is
 correlated by construction. What separates teams is the *lift*: how much better
 than their own baseline halftime-lead rate they do when the start goes well.
-A big lift means starts carry the game; a small one means the start gets given
-back.
+
 
 Cost note: this crawls one line score per game, the same data GetQ4Comebacks
 walks. If the daily refresh gets tight, merging the two into a single pass over

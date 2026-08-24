@@ -299,7 +299,7 @@ def render_effort_narrative(team_name, info, league_avg):
         delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
     st.caption(
-        "100% means they compete the same either way; below that means the "
+        "100% means they compete equally hard whether winning or losing, below 100% means the "
         "effort drops off once games go bad."
     )
 
