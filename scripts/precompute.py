@@ -94,6 +94,16 @@ CRAWL_DATASETS = (
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    # The image's nba_api version, printed because it is the usual suspect when
+    # a stat works locally but fails on the server: the pip layer is cached
+    # until requirements.txt changes, so a rebuilt image can still carry an old
+    # nba_api with different endpoint names or parameters.
+    try:
+        from importlib.metadata import version
+        print(f"nba_api {version('nba_api')}")
+    except Exception as e:
+        print(f"could not read nba_api version: {e}")
+
     # Pass 1, cheap core datasets for EVERY season first. These are a handful
     # of quick calls each, so the whole pass finishes fast. Doing them all up
     # front means that if the expensive comebacks pass below is interrupted
@@ -107,7 +117,13 @@ def main():
             exists = os.path.exists(os.path.join(DATA_DIR, f"{season}_{kind}.json"))
             if not complete or not exists:
                 print(f"Computing {season} {kind}...")
-                _write(f"{season}_{kind}.json", compute(season))
+                # Isolated per dataset. Without this, one failing stat aborts
+                # the whole refresh, including the line score crawl below, and
+                # every other season silently goes stale.
+                try:
+                    _write(f"{season}_{kind}.json", compute(season))
+                except Exception as e:
+                    print(f"  WARNING: {kind} failed for {season}: {e}")
                 time.sleep(1)
 
     # Pass 2, the expensive, network-fragile line score crawl. One walk over the
