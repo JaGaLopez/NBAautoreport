@@ -30,6 +30,16 @@ ADV_COLS = {
     "TM_TOV_PCT": "TOV%", "PACE": "PACE", "PIE": "PIE",
 }
 
+EFFORT_COMPONENT_LABELS = {
+    "DEFLECTIONS": "Deflections",
+    "CONTESTED_SHOTS": "Contested Shots",
+    "LOOSE_BALLS_RECOVERED": "Loose Balls",
+    "BOX_OUTS": "Box Outs",
+    "CHARGES_DRAWN": "Charges Drawn",
+    "SCREEN_ASSISTS": "Screen Assists",
+    "OREB_PCT": "ORB%",
+}
+
 BASIC_LOWER_IS_BETTER = {"TOV", "PF"}
 ADV_LOWER_IS_BETTER   = {"DRTG", "TOV%"}
 
@@ -135,6 +145,11 @@ def load_data(season):
     cb_resp   = requests.get(f"{API_URL}/teams/{season}/comebacks")
     comebacks = cb_resp.json() if cb_resp.ok else None
 
+    # Same deal for effort-while-losing. It additionally comes back empty for
+    # pre-2015-16 seasons, which have no NBA hustle tracking to build it from.
+    ef_resp = requests.get(f"{API_URL}/teams/{season}/effort-while-losing")
+    effort  = ef_resp.json() if ef_resp.ok else None
+
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
@@ -142,7 +157,7 @@ def load_data(season):
     basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
     adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
 
-    return round_for_display(basic_df), round_for_display(adv_df), weekly, comebacks
+    return round_for_display(basic_df), round_for_display(adv_df), weekly, comebacks, effort
 
 
 def selected_team_from(result):
@@ -181,6 +196,23 @@ def build_comparison(df, team_name, lower_is_better_set):
     )
     comp.index.name = "Metric"
     return comp.reset_index()
+
+
+def zscore_against(value, population):
+    """How many standard deviations `value` sits from its population, absolute.
+
+    Used to rank narrative stats measured on different scales against each
+    other. Returns 0 when there's nothing to compare against or every team is
+    identical, which just sorts that narrative last.
+    """
+    vals = [v for v in population if v is not None]
+    if len(vals) < 2:
+        return 0
+    mean = sum(vals) / len(vals)
+    var  = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1)
+    if var == 0:
+        return 0
+    return abs(value - mean) / var ** 0.5
 
 
 @st.cache_data(ttl=86400)
@@ -246,6 +278,60 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     show_table(games_df, height=175)
 
 
+@st.cache_data(ttl=86400)
+def team_effort_history(team_name):
+    """This team's effort-retention score in every season we have: {season: score}."""
+    scores = {}
+    for s in SEASONS:
+        resp = requests.get(f"{API_URL}/teams/{s}/effort-while-losing")
+        if not resp.ok:
+            continue
+        info = (resp.json().get("teams", {}) or {}).get(team_name)
+        if info is not None and info.get("effort_retention") is not None:
+            scores[s] = info["effort_retention"]
+    return scores
+
+
+def render_effort_narrative(team_name, info, league_avg):
+    """Render the effort-while-losing narrative: how much of its hustle a team
+    keeps in losses relative to its own wins, vs. the league average."""
+    score = info["effort_retention"]
+
+    st.metric(
+        "Effort While Losing vs. League Avg",
+        f"{score:.2f} vs. {league_avg:.2f}",
+        delta=round(score - league_avg, 2),
+    )
+    st.caption(
+        "Hustle rate in losses divided by the same team's rate in wins. "
+        "1.00 means they compete the same either way; below that means the "
+        "effort drops off once games go bad."
+    )
+
+    # Flag a season that is (or ties) this team's lowest across our data — only
+    # meaningful with more than one season and scores that actually vary.
+    history = team_effort_history(team_name)
+    if len(history) > 1:
+        lo, hi = min(history.values()), max(history.values())
+        if score == lo < hi:
+            st.caption(
+                f"📉 Historic low — least effort in losses for {team_name} "
+                f"in our {len(history)} seasons of data."
+            )
+
+    components = info.get("components") or {}
+    if not components:
+        return
+
+    comp_df = pd.DataFrame(
+        [
+            {"Metric": EFFORT_COMPONENT_LABELS.get(k, k), "Losses ÷ Wins": round(v, 2)}
+            for k, v in components.items()
+        ]
+    ).sort_values("Losses ÷ Wins")
+    show_table(comp_df, height=175)
+
+
 # ── Page setup ──────────────────────────────────────────────────────────────
 st.set_page_config(layout="wide")
 
@@ -282,7 +368,7 @@ if data is None:
     st.warning(f"Stats for {season} haven't been precomputed yet. Try another season.")
     st.stop()
 
-basic_df, adv_df, weekly, comebacks = data
+basic_df, adv_df, weekly, comebacks, effort = data
 
 # ── Layout ──────────────────────────────────────────────────────────────────
 # Create both column rows up front so we can fill them in any order.
@@ -320,22 +406,51 @@ with row1_right:
         st.caption("Narratives")
         if not selected_team:
             st.caption("Double-click a team on either table to see its narratives.")
-        elif comebacks is None:
-            st.info("Comeback data isn't available for this season yet.")
         else:
-            cb_teams = comebacks.get("teams", {}) if isinstance(comebacks, dict) else {}
-            cb_avg   = comebacks.get("league_average", 0) if isinstance(comebacks, dict) else 0
-            cb_info  = cb_teams.get(selected_team) or {}
-            cb_count = cb_info.get("count", 0)
-
             # Each narrative stat is rendered in its own encapsulated container,
-            # ordered top-to-bottom by how far the team sits from the league avg.
-            narratives = [{
-                "distinctness": abs(cb_count - cb_avg),
-                "render": lambda: render_comeback_narrative(
-                    selected_team, cb_count, cb_avg, cb_info.get("games", [])
-                ),
-            }]
+            # ordered top-to-bottom by how far the team sits from the league.
+            # Distinctness is a z-score rather than a raw gap so stats on
+            # different scales (comeback counts vs. effort ratios) rank fairly
+            # against each other.
+            narratives = []
+
+            if isinstance(comebacks, dict):
+                cb_teams = comebacks.get("teams", {}) or {}
+                cb_avg   = comebacks.get("league_average", 0)
+                cb_info  = cb_teams.get(selected_team) or {}
+                cb_count = cb_info.get("count", 0)
+                narratives.append({
+                    "distinctness": zscore_against(
+                        cb_count,
+                        [t.get("count", 0) for t in cb_teams.values()],
+                    ),
+                    "render": lambda: render_comeback_narrative(
+                        selected_team, cb_count, cb_avg, cb_info.get("games", [])
+                    ),
+                })
+
+            if isinstance(effort, dict):
+                ef_teams = effort.get("teams", {}) or {}
+                ef_avg   = effort.get("league_average", 0)
+                ef_info  = ef_teams.get(selected_team)
+                # Precompute stores a z_score per team already; fall back to
+                # computing one so an older data file still ranks sensibly.
+                if ef_info and ef_info.get("effort_retention") is not None:
+                    z = ef_info.get("z_score")
+                    if z is None:
+                        z = zscore_against(
+                            ef_info["effort_retention"],
+                            [t["effort_retention"] for t in ef_teams.values()],
+                        )
+                    narratives.append({
+                        "distinctness": abs(z),
+                        "render": lambda: render_effort_narrative(
+                            selected_team, ef_info, ef_avg
+                        ),
+                    })
+
+            if not narratives:
+                st.info("Narrative data isn't available for this season yet.")
             for n in sorted(narratives, key=lambda x: x["distinctness"], reverse=True):
                 with st.container(border=True):
                     n["render"]()

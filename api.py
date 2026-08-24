@@ -39,6 +39,11 @@ def teams_comebacks(season: str):
     return _cached(f"{season}_comebacks.json")
 
 
+@app.get("/teams/{season}/effort-while-losing")
+def teams_effort_while_losing(season: str):
+    return _cached(f"{season}_effort.json")
+
+
 @app.get("/teams/{season}")
 def teams(season: str):
     return _cached(f"{season}_basic.json")

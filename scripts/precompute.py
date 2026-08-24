@@ -19,6 +19,7 @@ from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
 from analytics.GetQ4Comebacks import GetAllTeamsQ4Comebacks
+from analytics.GetEffortWhileLosing import GetEffortWhileLosing
 
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -71,6 +72,9 @@ CORE_DATASETS = (
     ("advanced",      lambda s: GetAdvancedTeamStats(s).to_dict(orient="records")),
     ("average",       lambda s: BuildAverageTeam(s).to_dict()),
     ("weekly_netrtg", lambda s: GetWeeklyNetRating(s)),
+    # Four league-wide calls (hustle + advanced, split W/L) — cheap enough for
+    # the core pass, unlike the per-game comebacks work below.
+    ("effort",        lambda s: GetEffortWhileLosing(s)),
 )
 
 

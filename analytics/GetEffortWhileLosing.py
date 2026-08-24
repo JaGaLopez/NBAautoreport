@@ -1,28 +1,12 @@
-"""Effort-while-losing: does a team keep competing once the game goes bad?
 
-The idea is a *retention ratio* rather than a raw total. Raw hustle numbers in
-losses are confounded — a team that trails often has more chances to dive for
-loose balls, and garbage-time bench minutes inflate the counts. Comparing each
-team's hustle rate in losses against its own rate in wins cancels most of that
-out, leaving something closer to "do they stop trying."
-
-Cheap by design: three league-wide nba_api calls total (hustle in losses, hustle
-in wins, advanced in losses), so this belongs with the core precompute datasets
-rather than the expensive per-game passes.
-"""
 import time
 import pandas as pd
 from nba_api.stats.endpoints import leaguehustlestatsteam, leaguedashteamstats
 
 
-# nba_api defaults to a 30s read timeout; stats.nba.com throttles datacenter
-# IPs, so give each call more room and retry with exponential backoff.
+
 _TIMEOUT = 60
 
-# Hustle counting stats used as effort proxies. Each is normalized per team
-# minute before the win/loss ratio is taken, so overtime and blowout-length
-# rotations don't skew it. Columns missing from the response are skipped, which
-# keeps this working across the seasons where NBA hustle tracking changed shape.
 _HUSTLE_COLUMNS = (
     "DEFLECTIONS",
     "CONTESTED_SHOTS",
