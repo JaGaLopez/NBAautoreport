@@ -44,6 +44,16 @@ def teams_effort_while_losing(season: str):
     return _cached(f"{season}_effort.json")
 
 
+@app.get("/teams/{season}/hot-starts")
+def teams_hot_starts(season: str):
+    return _cached(f"{season}_hotstarts.json")
+
+
+@app.get("/teams/{season}/shooting-variance")
+def teams_shooting_variance(season: str):
+    return _cached(f"{season}_shooting.json")
+
+
 @app.get("/teams/{season}")
 def teams(season: str):
     return _cached(f"{season}_basic.json")

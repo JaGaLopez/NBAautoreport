@@ -150,6 +150,12 @@ def load_data(season):
     ef_resp = requests.get(f"{API_URL}/teams/{season}/effort-while-losing")
     effort  = ef_resp.json() if ef_resp.ok else None
 
+    hs_resp = requests.get(f"{API_URL}/teams/{season}/hot-starts")
+    hot_starts = hs_resp.json() if hs_resp.ok else None
+
+    sv_resp = requests.get(f"{API_URL}/teams/{season}/shooting-variance")
+    shooting = sv_resp.json() if sv_resp.ok else None
+
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
@@ -157,7 +163,15 @@ def load_data(season):
     basic_df = basic_raw[[c for c in BASIC_COLS if c in basic_raw.columns]].rename(columns=BASIC_COLS)
     adv_df   = adv_raw[[c for c in ADV_COLS if c in adv_raw.columns]].rename(columns=ADV_COLS)
 
-    return round_for_display(basic_df), round_for_display(adv_df), weekly, comebacks, effort
+    return (
+        round_for_display(basic_df),
+        round_for_display(adv_df),
+        weekly,
+        comebacks,
+        effort,
+        hot_starts,
+        shooting,
+    )
 
 
 def selected_team_from(result):
@@ -314,6 +328,95 @@ def render_effort_narrative(team_name, info, league_avg):
     show_table(comp_df, height=175)
 
 
+def render_hot_starts_narrative(team_name, info, league_avg):
+    """Render the hot-starts narrative: how often a team leads after one
+    quarter, and whether that early lead actually survives to halftime."""
+    q1_pct = info["q1_lead_pct"]
+
+    st.metric(
+        "Hot Starts",
+        f"{q1_pct:.0%} vs. {league_avg:.0%} League Avg",
+        delta=f"{(q1_pct - league_avg) * 100:+.0f} pts",
+    )
+    st.caption("Share of games this team led after the first quarter.")
+
+    conditional = info.get("h1_lead_after_q1_lead_pct")
+    lift = info.get("lift_pts")
+    if conditional is not None and lift is not None:
+        # Some of this pairing is baked in, since the first quarter is part of
+        # the half. The lift against the team's own halftime rate is the part
+        # that actually says whether good starts hold up.
+        holds = "holds onto" if lift >= 0 else "gives back"
+        st.caption(
+            f"{team_name} {holds} the start: leading at halftime in "
+            f"{conditional:.0%} of the games it won the first quarter, against "
+            f"{info['h1_lead_pct']:.0%} of all its games ({lift:+.1f} pts)."
+        )
+
+    starts_df = pd.DataFrame(
+        [
+            {"Split": "Led after Q1", "Games": info["q1_leads"], "Rate": round(q1_pct * 100)},
+            {"Split": "Led at halftime", "Games": info["h1_leads"],
+             "Rate": round(info["h1_lead_pct"] * 100)},
+            {"Split": "Both", "Games": info["h1_lead_after_q1_lead"],
+             "Rate": round(conditional * 100) if conditional is not None else None},
+        ]
+    )
+    show_table(starts_df, height=140)
+
+
+def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
+    """Render the shooting-variance narrative: the shooting a team's season says
+    to expect, then how the last one, two, and three weeks compare to it."""
+    stdev = info.get("efg_stdev")
+    base = info.get("baseline") or {}
+
+    if stdev is not None:
+        st.metric(
+            "Shooting Variance",
+            f"{stdev:.1f} vs. {league_avg:.1f} League Avg",
+            delta=f"{stdev - league_avg:+.1f} pts",
+            # A bigger swing is not automatically bad, so don't paint it red.
+            delta_color="off",
+        )
+        st.caption(
+            "Game-to-game swing in eFG%, in points. Higher means streakier, "
+            "so a cold week says less about this team than about a steady one."
+        )
+
+    # What the season says to expect, before looking at the recent form below.
+    if base.get("efg_pct") is not None:
+        expected = (
+            f"Expected: {base['efg_pct']:.1%} eFG% on {base['fga']:.0f} attempts "
+            f"per game, {base['efg_percentile']}th percentile in the league."
+        )
+        if base.get("open_share") is not None:
+            expected += (
+                f" {base['open_share']:.0%} of those looks are open or wide open "
+                f"({base['open_share_percentile']}th percentile), and they shoot "
+                f"{base['open_efg_pct']:.1%} on them."
+            )
+        st.caption(expected)
+
+    windows = info.get("windows") or {}
+    if not windows:
+        return
+
+    rows = []
+    for label, w in windows.items():
+        rows.append({
+            "Window": label,
+            "Games": w["games"],
+            "eFG%": round(w["efg_pct"] * 100, 1),
+            "vs. Season": w["efg_delta_pts"],
+            "Swings": w.get("swings"),
+        })
+    show_table(pd.DataFrame(rows), height=140)
+
+    if as_of:
+        st.caption(f"Through games of {as_of}.")
+
+
 # Page setup 
 st.set_page_config(layout="wide")
 
@@ -355,19 +458,19 @@ if data is None:
     st.warning(f"Stats for {season} haven't been precomputed yet. Try another season.")
     st.stop()
 
-basic_df, adv_df, weekly, comebacks, effort = data
+basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting = data
 
-# Layout 
-# Create both column rows up front so we can fill them in any order.
-row1_left, row1_right = st.columns(2)
-row2_left, row2_right = st.columns(2)
+# Layout
+# One column pair, with each side stacking its own content. Two separate
+# st.columns() rows would align the second row across both sides, leaving a gap
+# under the basic table whenever the narratives column is taller.
+left, right = st.columns(2)
 
 # Render the two selectable source tables first (both double-clickable)
-with row1_left:
+with left:
     st.caption("Per Game Stats")
     basic_result = show_table(basic_df, double_click=True)
 
-with row2_left:
     st.caption("Advanced Stats")
     adv_result = show_table(adv_df, double_click=True)
 
@@ -388,7 +491,7 @@ st.session_state["prev_adv_sel"]   = adv_sel
 st.session_state["selected_team"]  = selected_team
 
 # Now render the comparison tables on the right
-with row1_right:
+with right:
     if view == "Narratives":
         st.caption("Narratives")
         if not selected_team:
@@ -423,6 +526,31 @@ with row1_right:
                         )
                     )
 
+            if isinstance(hot_starts, dict):
+                hs_teams = hot_starts.get("teams", {}) or {}
+                hs_avg   = hot_starts.get("league_average", 0)
+                hs_info  = hs_teams.get(selected_team)
+
+                if hs_info and hs_info.get("q1_lead_pct") is not None:
+                    narratives.append(
+                        lambda: render_hot_starts_narrative(
+                            selected_team, hs_info, hs_avg
+                        )
+                    )
+
+            if isinstance(shooting, dict):
+                sv_teams = shooting.get("teams", {}) or {}
+                sv_avg   = shooting.get("league_average", 0)
+                sv_as_of = shooting.get("as_of")
+                sv_info  = sv_teams.get(selected_team)
+
+                if sv_info:
+                    narratives.append(
+                        lambda: render_shooting_variance_narrative(
+                            selected_team, sv_info, sv_avg, sv_as_of
+                        )
+                    )
+
             if not narratives:
                 st.info("Narrative data isn't available for this season yet.")
             for render in narratives:
@@ -436,11 +564,9 @@ with row1_right:
             show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
                        cell_style=PERCENTILE_STYLE, height=175)
 
-with row2_right:
-    if view == "Stats" and selected_team:
-        st.caption("Advanced Stats")
-        show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
-                   cell_style=PERCENTILE_STYLE, height=175)
+            st.caption("Advanced Stats")
+            show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
+                       cell_style=PERCENTILE_STYLE, height=175)
 
 # Net rating trend (full width, below all tables)
 st.divider()

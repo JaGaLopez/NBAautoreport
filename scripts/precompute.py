@@ -20,6 +20,8 @@ from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
 from analytics.GetQ4Comebacks import GetAllTeamsQ4Comebacks
 from analytics.GetEffortWhileLosing import GetEffortWhileLosing
+from analytics.GetHotStarts import GetAllTeamsHotStarts
+from analytics.GetShootingVariance import GetShootingVariance
 
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -40,7 +42,7 @@ def _write(filename, obj):
 
 
 def _season_complete(season):
-    """True if stored data shows all 30 teams have played 82 games — no API call."""
+    """True if stored data shows all 30 teams have played 82 games, no API call."""
     path = os.path.join(DATA_DIR, f"{season}_basic.json")
     if not os.path.exists(path):
         return False
@@ -52,13 +54,13 @@ def _season_complete(season):
     )
 
 
-def _comebacks_current(season):
-    """True if the stored comebacks file uses the {league_average, teams} shape.
+def _crawl_current(season, kind):
+    """True if a stored crawl file uses the {league_average, teams} shape.
 
-    Older files were a plain team-keyed dict; those must be regenerated so the
-    UI can read league_average and rank narrative stats.
+    Older comeback files were a plain team-keyed dict; those must be
+    regenerated so the UI can read league_average.
     """
-    path = os.path.join(DATA_DIR, f"{season}_comebacks.json")
+    path = os.path.join(DATA_DIR, f"{season}_{kind}.json")
     if not os.path.exists(path):
         return False
     with open(path) as f:
@@ -75,13 +77,23 @@ CORE_DATASETS = (
     # Four league-wide calls (hustle + advanced, split W/L), cheap enough for
     # the core pass, unlike the per-game comebacks work below.
     ("effort",        lambda s: GetEffortWhileLosing(s)),
+    # One game-log call for the whole league plus two shot-tracking calls.
+    ("shooting",      lambda s: GetShootingVariance(s)),
+)
+
+# Expensive datasets: each walks one line score per game (~1,200 calls) and can
+# run for the better part of an hour. Both read the same line scores, so if the
+# nightly job ever gets tight, merging them into a single pass is the fix.
+CRAWL_DATASETS = (
+    ("comebacks", lambda s: GetAllTeamsQ4Comebacks(s)),
+    ("hotstarts", lambda s: GetAllTeamsHotStarts(s)),
 )
 
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    # Pass 1 — cheap core datasets for EVERY season first. These are a handful
+    # Pass 1, cheap core datasets for EVERY season first. These are a handful
     # of quick calls each, so the whole pass finishes fast. Doing them all up
     # front means that if the expensive comebacks pass below is interrupted
     # (throttling, or a redeploy restarting the run), every season still has the
@@ -97,20 +109,22 @@ def main():
                 _write(f"{season}_{kind}.json", compute(season))
                 time.sleep(1)
 
-    # Pass 2 — expensive, network-fragile comebacks (one game-log call per team
-    # plus one box score per game, ~1,200 calls). Isolated per season so a
-    # throttled failure on one doesn't starve the rest.
+    # Pass 2, the expensive, network-fragile line score crawls. Each dataset is
+    # isolated per season so a throttled failure on one doesn't starve the rest.
     for season in SEASONS:
         complete = _season_complete(season)
-        # Skip only if already stored in the current {league_average, teams} shape.
-        if complete and _comebacks_current(season):
-            continue
-        print(f"Computing {season} comebacks...")
-        try:
-            _write(f"{season}_comebacks.json", GetAllTeamsQ4Comebacks(season))
-        except Exception as e:
-            print(f"  WARNING: comebacks failed for {season}: {e}")
-        time.sleep(1)
+        for kind, compute in CRAWL_DATASETS:
+            # Skip only a finished season already stored in the current
+            # {league_average, teams} shape. Older comeback files were a plain
+            # team-keyed dict and must be regenerated.
+            if complete and _crawl_current(season, kind):
+                continue
+            print(f"Computing {season} {kind}...")
+            try:
+                _write(f"{season}_{kind}.json", compute(season))
+            except Exception as e:
+                print(f"  WARNING: {kind} failed for {season}: {e}")
+            time.sleep(1)
 
     print(f"Done. Data dir: {DATA_DIR}")
 
