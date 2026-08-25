@@ -19,7 +19,7 @@ from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
 from analytics.GetEffortWhileLosing import GetEffortWhileLosing
-from analytics.GetShootingVariance import GetShootingVariance
+from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTING_SCHEMA
 from analytics.LineScores import iter_line_scores
 from analytics import GetQ4Comebacks as comebacks
 from analytics import GetHotStarts as hotstarts
@@ -53,6 +53,30 @@ def _season_complete(season):
         len(rows) >= TEAMS_IN_LEAGUE
         and all(row.get("GP", 0) >= GAMES_IN_SEASON for row in rows)
     )
+
+
+# Datasets whose stored shape is versioned. A finished season is normally left
+# alone once written, so without this a stat that gains a field would never
+# regenerate for any completed season.
+DATASET_SCHEMA = {"shooting": SHOOTING_SCHEMA}
+
+
+def _core_current(season, kind):
+    """True if a stored core dataset exists and is not an outdated shape."""
+    path = os.path.join(DATA_DIR, f"{season}_{kind}.json")
+    if not os.path.exists(path):
+        return False
+
+    want = DATASET_SCHEMA.get(kind)
+    if want is None:
+        return True
+
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    return isinstance(data, dict) and data.get("schema") == want
 
 
 def _crawl_current(season, kind):
@@ -114,8 +138,7 @@ def main():
         for kind, compute in CORE_DATASETS:
             # In-progress seasons change daily (recompute); finished seasons only
             # need a file that's actually missing.
-            exists = os.path.exists(os.path.join(DATA_DIR, f"{season}_{kind}.json"))
-            if not complete or not exists:
+            if not complete or not _core_current(season, kind):
                 print(f"Computing {season} {kind}...")
                 # Isolated per dataset. Without this, one failing stat aborts
                 # the whole refresh, including the line score crawl below, and

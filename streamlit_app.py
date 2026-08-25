@@ -227,6 +227,18 @@ def team_comeback_counts(team_name):
     return counts
 
 
+def tech_note(text):
+    """Render a technical blurb: what the metric means and how to read it.
+
+    These are body text (white) so the definition of the stat carries the same
+    weight as the number. Team-specific observations stay st.caption gray.
+    """
+    st.markdown(
+        f"<p style='font-size:0.9rem; margin:0.25rem 0 0.5rem 0;'>{text}</p>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_comeback_narrative(team_name, team_count, league_avg, games):
     """Render the 4th-quarter-comebacks narrative: the team's total vs. the league
     average (the metric's arrow shows the gap), with a historic-low note and the
@@ -236,7 +248,9 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         f"{team_count} vs. {round(league_avg, 1)} (League Average)",
         delta=round(team_count - league_avg, 1),
     )
-
+    tech_note(
+        "A comeback is trailing after three quarters and still winning the game."
+    )
 
     history = team_comeback_counts(team_name)
     if len(history) > 1:
@@ -298,9 +312,9 @@ def render_effort_narrative(team_name, info, league_avg):
         f"{score:.0%} vs. {league_avg:.0%} (League Average)",
         delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
-    st.caption(
-        "100% means they compete equally hard whether winning or losing, below 100% means the "
-        "effort drops off once games go bad."
+    tech_note(
+        "100% means they compete equally hard whether winning or losing, "
+        "below 100% means the effort drops off once games go bad."
     )
 
     # Flag a season that is (or ties) this team's lowest across our data. Only
@@ -335,10 +349,10 @@ def render_hot_starts_narrative(team_name, info, league_avg):
 
     st.metric(
         "Hot Starts",
-        f"{q1_pct:.0%} vs. {league_avg:.0%} League Avg",
+        f"{q1_pct:.0%} vs. {league_avg:.0%} (League Average)",
         delta=f"{(q1_pct - league_avg) * 100:+.0f} pts",
     )
-    st.caption("Share of games this team led after the first quarter.")
+    tech_note("Share of games this team led after the first quarter.")
 
     conditional = info.get("h1_lead_after_q1_lead_pct")
     lift = info.get("lift_pts")
@@ -365,23 +379,42 @@ def render_hot_starts_narrative(team_name, info, league_avg):
     show_table(starts_df, height=140)
 
 
-def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
-    """Render the shooting-variance narrative: the shooting a team's season says
-    to expect, then how the last one, two, and three weeks compare to it."""
+def _fgm_band(mean, spread):
+    """A one-standard-deviation band of made shots, as a "38-45" string."""
+    if mean is None or spread is None:
+        return None
+    return f"{round(mean - spread)}-{round(mean + spread)}"
+
+
+def render_shooting_variance_narrative(team_name, info, league_avg, as_of,
+                                       league_fgm, league_fgm_stdev):
+    """Render the shooting-variance narrative: the band of made shots a team
+    lands in on a typical night against the league's, whether that band is
+    streaky or steady, and how the last one, two, and three weeks compare."""
     stdev = info.get("efg_stdev")
     base = info.get("baseline") or {}
 
-    if stdev is not None:
+    band = _fgm_band(base.get("fgm"), base.get("fgm_stdev"))
+    league_band = _fgm_band(league_fgm, league_fgm_stdev)
+
+    if band and league_band:
+        # Streaky vs. steady is judged on eFG% swing, not on the width of the
+        # band above: makes per game also move with pace and attempts, while
+        # eFG% isolates how much the shooting itself wobbles. delta_color
+        # inverts for streaky so the bubble reads red without a minus sign.
+        streaky = stdev is not None and stdev > league_avg
         st.metric(
             "Shooting Variance",
-            f"{stdev:.1f} vs. {league_avg:.1f} League Avg",
-            delta=f"{stdev - league_avg:+.1f} pts",
-            # A bigger swing is not automatically bad, so don't paint it red.
-            delta_color="off",
+            f"FGM: {band} vs. FGM {league_band} (League Average)",
+            delta="Streaky" if streaky else "Stable",
+            delta_color="inverse" if streaky else "normal",
         )
-        st.caption(
-            "Game-to-game swing in eFG%, in points. Higher means streakier, "
-            "so a cold week says less about this team than about a steady one."
+        tech_note(
+            "Made shots on a typical night, one standard deviation either side "
+            "of this team's average. Streaky or stable is set by game-to-game "
+            "swing in eFG%, in points, against the league average: higher means "
+            "streakier, so a cold week says less about this team than about a "
+            "steady one."
         )
 
     # What the season says to expect, before looking at the recent form below.
@@ -412,6 +445,11 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
             "Swings": w.get("swings"),
         })
     show_table(pd.DataFrame(rows), height=140)
+    tech_note(
+        "Swings is that window's gap measured in this team's own standard "
+        "deviations: around 1.0 is an ordinary hot or cold stretch, 2.0 or more "
+        "is a genuine outlier rather than noise."
+    )
 
     if as_of:
         st.caption(f"Through games of {as_of}.")
@@ -542,12 +580,15 @@ with right:
                 sv_teams = shooting.get("teams", {}) or {}
                 sv_avg   = shooting.get("league_average", 0)
                 sv_as_of = shooting.get("as_of")
+                sv_fgm   = shooting.get("league_fgm")
+                sv_fgm_sd = shooting.get("league_fgm_stdev")
                 sv_info  = sv_teams.get(selected_team)
 
                 if sv_info:
                     narratives.append(
                         lambda: render_shooting_variance_narrative(
-                            selected_team, sv_info, sv_avg, sv_as_of
+                            selected_team, sv_info, sv_avg, sv_as_of,
+                            sv_fgm, sv_fgm_sd
                         )
                     )
 

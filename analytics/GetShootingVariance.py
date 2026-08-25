@@ -31,6 +31,11 @@ WINDOWS = (("1 Week", 7), ("2 Weeks", 14), ("3 Weeks", 21))
 # nba_api's closest-defender buckets that count as an uncontested look.
 OPEN_RANGES = ("4-6 Feet - Open", "6+ Feet - Wide Open")
 
+# Bump whenever the stored shape changes. Finished seasons are normally left
+# alone once written, so precompute uses this to tell a stale file from a
+# current one and regenerate it.
+SCHEMA = 2
+
 
 def _retry(fetch, retries=4, pause=1.0):
     """Call `fetch`, retrying transient nba_api failures. Returns None if all fail."""
@@ -185,6 +190,11 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
             # Sample stdev needs at least two games; a one-game season has no
             # meaningful spread to report.
             "efg_stdev": float(games["EFG"].std()) if played > 1 else None,
+            # Makes per game and their spread, which is what the card shows:
+            # a one-standard-deviation band of made shots reads more concretely
+            # than a percentage of a percentage.
+            "fgm": fgm / played,
+            "fgm_stdev": float(games["FGM"].std()) if played > 1 else None,
             "fga": fga / played,
             "fg3a": fg3a / played,
             "fg3a_rate": (fg3a / fga) if fga else None,
@@ -232,6 +242,11 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
             "baseline": {
                 "efg_pct": round(base["efg_pct"], 3) if base["efg_pct"] is not None else None,
                 "efg_percentile": efg_ranks.get(base["efg_pct"]),
+                "fgm": round(base["fgm"], 1),
+                "fgm_stdev": (
+                    round(base["fgm_stdev"], 1)
+                    if base["fgm_stdev"] is not None else None
+                ),
                 "fga": round(base["fga"], 1),
                 "fg3a": round(base["fg3a"], 1),
                 "fg3a_rate": round(base["fg3a_rate"], 3) if base["fg3a_rate"] is not None else None,
@@ -245,11 +260,18 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
             "windows": windows,
         }
 
-    spreads = [t["efg_stdev"] for t in teams.values() if t["efg_stdev"] is not None]
-    league_average = round(sum(spreads) / len(spreads), 1) if spreads else 0
+    def _mean(values):
+        vals = [v for v in values if v is not None]
+        return round(sum(vals) / len(vals), 1) if vals else 0
 
+    # League reference points: the average team's eFG% swing (what decides
+    # steady vs. streaky) and the average team's makes per game and spread
+    # (what the card's comparison band is drawn from).
     return {
-        "league_average": league_average,
+        "schema": SCHEMA,
+        "league_average": _mean(t["efg_stdev"] for t in teams.values()),
+        "league_fgm": _mean(t["baseline"]["fgm"] for t in teams.values()),
+        "league_fgm_stdev": _mean(t["baseline"]["fgm_stdev"] for t in teams.values()),
         "windows": [label for label, _ in WINDOWS],
         "as_of": as_of.strftime("%Y-%m-%d"),
         "teams": teams,
