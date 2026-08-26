@@ -257,6 +257,8 @@ def insight(text):
 # st.metric renders on the other cards.
 _BUBBLE_GREEN = "rgb(9, 171, 59)"
 _BUBBLE_RED = "rgb(255, 43, 43)"
+_BUBBLE_GREEN_BG = "rgba(9, 171, 59, 0.2)"
+_BUBBLE_RED_BG = "rgba(255, 43, 43, 0.2)"
 
 
 def bubbles(items):
@@ -270,10 +272,13 @@ def bubbles(items):
     spans = []
     for text, good in items:
         color = _BUBBLE_GREEN if good else _BUBBLE_RED
-        arrow = "&#9650;" if good else "&#9660;"
+        background = _BUBBLE_GREEN_BG if good else _BUBBLE_RED_BG
+        arrow = "&#8593;" if good else "&#8595;"
         spans.append(
-            f"<span style='color:{color}; font-size:0.875rem; "
-            f"margin-right:0.75rem; white-space:nowrap;'>{arrow} {text}</span>"
+            f"<span style='color:{color}; background-color:{background}; "
+            f"font-size:0.875rem; padding:0.15rem 0.6rem; border-radius:0.5rem; "
+            f"margin-right:0.5rem; white-space:nowrap; display:inline-block;'>"
+            f"{arrow} {text}</span>"
         )
     st.markdown(
         f"<div style='margin:-0.5rem 0 0.5rem 0;'>{''.join(spans)}</div>",
@@ -504,7 +509,7 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
                 "Window": label,
                 "Games": w["games"],
                 "eFG%": round(w["efg_pct"] * 100, 1),
-                "vs. Season (pts)": delta,
+                "vs. Season (FG%)": delta,
                 "Swings": w.get("swings"),
                 "Form": "Hot" if delta >= 0 else "Cold",
             })
@@ -546,6 +551,11 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
             "Swings puts that window on a 0 to 2 scale in this team's own "
             "standard deviations: 0 is cold, 1 is normal, 2 is hot. vs. Season "
             "is the same gap in eFG percentage points."
+        )
+        tech_note(
+            "Streaky points down because a team you can't count on night to "
+            "night is the harder one to trust, not because shooting variance "
+            "is bad in itself."
         )
 
 
