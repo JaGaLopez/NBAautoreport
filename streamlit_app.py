@@ -66,8 +66,16 @@ function(params) {
 DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
 
+# Center both the header label and the cell text. AG Grid aligns headers with
+# flexbox and cells with text-align, so it takes both rules.
+CENTERED_CSS = {
+    ".ag-header-cell-label": {"justify-content": "center"},
+    ".ag-cell": {"text-align": "center"},
+}
+
+
 def show_table(df, *, double_click=False, cell_style=None, height=None,
-               pre_selected=None):
+               pre_selected=None, fit_width=False):
     gb = GridOptionsBuilder.from_dataframe(df)
     # suppressColumnVirtualisation so every column (even off-screen ones on wide
     # tables) gets measured and autosized to its content.
@@ -107,12 +115,17 @@ def show_table(df, *, double_click=False, cell_style=None, height=None,
     for col in go.get("columnDefs", []):
         col.update(no_filter)
 
-    # fitCellContents = size every column to its content (header + longest cell).
-    go["autoSizeStrategy"] = {"type": "fitCellContents"}
+    # fitGridWidth spreads a handful of columns across the full width, which is
+    # what the narrow narrative tables want; fitCellContents sizes each column to
+    # its content and lets the wide stats tables scroll sideways.
+    go["autoSizeStrategy"] = {
+        "type": "fitGridWidth" if fit_width else "fitCellContents"
+    }
 
     kwargs = dict(
         gridOptions=go,
         allow_unsafe_jscode=True,
+        custom_css=CENTERED_CSS,
         update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
     )
     if height is not None:
@@ -333,7 +346,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
             "FINAL_TEAM": "Final",
             "FINAL_OPP": "Final (Opp)",
         })
-        show_table(games_df, height=175)
+        show_table(games_df, height=175, fit_width=True)
 
     tech_note(
         "A comeback is trailing after three quarters and still winning the game."
@@ -388,7 +401,7 @@ def render_effort_narrative(team_name, info, league_avg):
                 for k, v in components.items()
             ]
         ).sort_values("% of Winning Effort")
-        show_table(comp_df, height=175)
+        show_table(comp_df, height=175, fit_width=True)
 
     tech_note(
         "100% means they compete equally hard whether winning or losing, "
@@ -434,7 +447,7 @@ def render_hot_starts_narrative(team_name, info, league_avg):
              "Rate": round(held_pct * 100) if held_pct is not None else None},
         ]
     )
-    show_table(starts_df, height=140)
+    show_table(starts_df, height=140, fit_width=True)
 
     tech_note(
         f"A start counts only at {MIN_LEAD} points or more, since a one-point "
@@ -533,7 +546,7 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
                 "Form": "Hot" if delta >= 0 else "Cold",
             })
         windows_df = pd.DataFrame(rows).dropna(axis=1, how="all")
-        show_table(windows_df, height=140)
+        show_table(windows_df, height=140, fit_width=True)
 
     # Run lengths, and what usually follows a game on the current side. For most
     # teams this lands near a coin flip, which is the honest answer.
