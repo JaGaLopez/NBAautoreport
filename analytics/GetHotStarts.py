@@ -14,6 +14,14 @@ the season's line scores is the obvious optimization.
 import pandas as pd
 from nba_api.stats.static import teams as nba_teams
 
+# A lead only counts as a start once it is this many points. A one-point edge
+# after twelve minutes is noise, not a hot start.
+MIN_LEAD = 5
+
+# Bump whenever the stored shape changes, so precompute regenerates a finished
+# season's file instead of leaving a stale one in place.
+SCHEMA = 1
+
 # The line score crawl is shared with the other stats built on it, so one pass
 # over the season can feed all of them. See analytics/LineScores.py.
 from analytics.LineScores import iter_line_scores
@@ -38,7 +46,7 @@ def _quarter(row, *keys):
 def new_tally():
     """Empty accumulator: every team present with zero games."""
     return {
-        t["id"]: {"games": 0, "q1": 0, "h1": 0, "both": 0}
+        t["id"]: {"games": 0, "q1": 0, "h1": 0, "held": 0}
         for t in nba_teams.get_teams()
     }
 
@@ -63,14 +71,20 @@ def add_game(tally, game_id, line_score):
         row = tally.get(team["TEAM_ID"])
         if row is None:
             continue
+
+        q1_margin = q1 - opp_q1
+        h1_margin = h1 - opp_h1
+
         # bool()/int() rather than the numpy scalars pandas hands back,
         # so the tallies stay JSON serializable for precompute.
         row["games"] += 1
-        led_q1 = bool(q1 > opp_q1)
-        led_h1 = bool(h1 > opp_h1)
+        led_q1 = bool(q1_margin >= MIN_LEAD)
+        led_h1 = bool(h1_margin >= MIN_LEAD)
         row["q1"] += int(led_q1)
         row["h1"] += int(led_h1)
-        row["both"] += int(led_q1 and led_h1)
+        # Held means the halftime lead is at least as big as the one after the
+        # first quarter, so a start that gets whittled away doesn't count.
+        row["held"] += int(led_q1 and bool(h1_margin >= q1_margin))
 
 
 def finish(tally):
@@ -85,8 +99,8 @@ def finish(tally):
 
         q1_pct = row["q1"] / row["games"]
         h1_pct = row["h1"] / row["games"]
-        # Conditional is undefined for a team that never led after one quarter.
-        conditional = row["both"] / row["q1"] if row["q1"] else None
+        # Undefined for a team that never opened a qualifying lead at all.
+        held_pct = row["held"] / row["q1"] if row["q1"] else None
 
         teams[name] = {
             "games": row["games"],
@@ -94,28 +108,28 @@ def finish(tally):
             "q1_lead_pct": round(q1_pct, 3),
             "h1_leads": row["h1"],
             "h1_lead_pct": round(h1_pct, 3),
-            "h1_lead_after_q1_lead": row["both"],
-            "h1_lead_after_q1_lead_pct": (
-                round(conditional, 3) if conditional is not None else None
-            ),
-            "lift_pts": (
-                round((conditional - h1_pct) * 100, 1)
-                if conditional is not None else None
-            ),
+            "held": row["held"],
+            "held_pct": round(held_pct, 3) if held_pct is not None else None,
         }
 
     if not teams:
-        return {"league_average": 0, "teams": {}}
+        return {"schema": SCHEMA, "league_average": 0, "teams": {}}
 
     league_average = sum(t["q1_lead_pct"] for t in teams.values()) / len(teams)
-    return {"league_average": round(league_average, 3), "teams": teams}
+    return {
+        "schema": SCHEMA,
+        "league_average": round(league_average, 3),
+        "teams": teams,
+    }
 
 
 def GetAllTeamsHotStarts(SEASON):
     """First-quarter and halftime lead rates for every team in a season.
 
-    Ties are not leads: a team tied after one quarter is counted as not
-    leading, in both the numerator and the conditional.
+    A lead counts only at MIN_LEAD points or more, so narrow edges that mean
+    nothing after twelve minutes are excluded. "Held" is the stricter test: the
+    team opened a qualifying first-quarter lead and carried at least that much
+    of it into halftime.
 
     This runs the line score crawl for this stat alone. The daily precompute
     instead drives new_tally/add_game/finish directly so one crawl feeds every
@@ -123,17 +137,16 @@ def GetAllTeamsHotStarts(SEASON):
 
     Returns:
         {
-            "league_average": 0.5,       # mean q1_lead_pct across all 30 teams
+            "league_average": 0.3,       # mean q1_lead_pct across all 30 teams
             "teams": {
                 "Atlanta Hawks": {
                     "games": 82,
-                    "q1_leads": 45,
-                    "q1_lead_pct": 0.549,
-                    "h1_leads": 43,
-                    "h1_lead_pct": 0.524,
-                    "h1_lead_after_q1_lead": 36,
-                    "h1_lead_after_q1_lead_pct": 0.8,
-                    "lift_pts": 27.6,    # conditional minus baseline, in points
+                    "q1_leads": 27,      # led by MIN_LEAD+ after one quarter
+                    "q1_lead_pct": 0.329,
+                    "h1_leads": 30,      # led by MIN_LEAD+ at halftime
+                    "h1_lead_pct": 0.366,
+                    "held": 15,          # of the 27, kept a lead that big
+                    "held_pct": 0.556,
                 },
                 ...
             },
@@ -160,9 +173,9 @@ if __name__ == "__main__":
         reverse=True,
     )
     for name, row in ranked:
-        lift = row["lift_pts"]
-        lift_text = f"{lift:+.1f} pts" if lift is not None else "n/a"
+        held = row["held_pct"]
+        held_text = f"{held:.1%}" if held is not None else "n/a"
         print(
             f"{row['q1_lead_pct']:>6.1%} Q1  {row['h1_lead_pct']:>6.1%} H1  "
-            f"lift {lift_text:>10}  {name}"
+            f"held {held_text:>7}  {name}"
         )

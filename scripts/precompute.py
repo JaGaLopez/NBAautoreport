@@ -23,6 +23,7 @@ from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTIN
 from analytics.LineScores import iter_line_scores
 from analytics import GetQ4Comebacks as comebacks
 from analytics import GetHotStarts as hotstarts
+from analytics.GetHotStarts import SCHEMA as HOTSTARTS_SCHEMA
 
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
 DATA_DIR = os.environ.get("DATA_DIR", "data")
@@ -58,7 +59,12 @@ def _season_complete(season):
 # Datasets whose stored shape is versioned. A finished season is normally left
 # alone once written, so without this a stat that gains a field would never
 # regenerate for any completed season.
-DATASET_SCHEMA = {"shooting": SHOOTING_SCHEMA}
+DATASET_SCHEMA = {
+    "shooting": SHOOTING_SCHEMA,
+    "hotstarts": HOTSTARTS_SCHEMA,
+    # Comebacks deliberately has no schema. Its stored files are valid and cost
+    # a full crawl to rebuild, so it keeps the older league_average check below.
+}
 
 
 def _core_current(season, kind):
@@ -80,14 +86,19 @@ def _core_current(season, kind):
 
 
 def _crawl_current(season, kind):
-    """True if a stored crawl file uses the {league_average, teams} shape.
+    """True if a stored crawl file is usable as-is.
 
-    Older comeback files were a plain team-keyed dict; those must be
-    regenerated so the UI can read league_average.
+    Versioned datasets are checked by schema. The rest just need the
+    {league_average, teams} shape: older comeback files were a plain team-keyed
+    dict and must be regenerated so the UI can read league_average.
     """
     path = os.path.join(DATA_DIR, f"{season}_{kind}.json")
     if not os.path.exists(path):
         return False
+
+    if kind in DATASET_SCHEMA:
+        return _core_current(season, kind)
+
     with open(path) as f:
         data = json.load(f)
     return isinstance(data, dict) and "league_average" in data

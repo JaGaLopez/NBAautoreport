@@ -40,6 +40,9 @@ EFFORT_COMPONENT_LABELS = {
     "OREB_PCT": "ORB%",
 }
 
+# Mirrors MIN_LEAD in analytics/GetHotStarts.py, which defines the stat.
+MIN_LEAD = 5
+
 BASIC_LOWER_IS_BETTER = {"TOV", "PF"}
 ADV_LOWER_IS_BETTER   = {"DRTG", "TOV%"}
 
@@ -248,9 +251,6 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         f"{team_count} vs. {round(league_avg, 1)} (League Average)",
         delta=round(team_count - league_avg, 1),
     )
-    tech_note(
-        "A comeback is trailing after three quarters and still winning the game."
-    )
 
     history = team_comeback_counts(team_name)
     if len(history) > 1:
@@ -261,30 +261,31 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
                 f"in our {len(history)} seasons of data."
             )
 
-    if not games:
-        return
+    if games:
+        # Biggest comeback this season: the largest Q3 deficit this team erased.
+        biggest = max(games, key=lambda g: g["DEFICIT_AFTER_Q3"])
+        big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
+        st.caption(
+            f"Biggest comeback this season: "
+            f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp}."
+        )
 
-    # Biggest comeback this season: the largest Q3 deficit this team erased.
-    biggest = max(games, key=lambda g: g["DEFICIT_AFTER_Q3"])
-    big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
-    big_date = pd.to_datetime(biggest["GAME_DATE"]).strftime("%m/%d")
-    st.caption(
-        f"Biggest comeback this season: "
-        f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp}."
+        games_df = pd.DataFrame(games)
+        games_df["Date"] = pd.to_datetime(games_df["GAME_DATE"]).dt.strftime("%m/%d")
+        # Strip the selected team's own abbreviation, leaving just the opponent.
+        games_df["Opponent"] = games_df["MATCHUP"].str.split("vs.").str[-1].str.strip()
+        games_df = games_df[
+            ["Date", "Opponent", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
+        ].rename(columns={
+            "DEFICIT_AFTER_Q3": "Q3 Deficit",
+            "FINAL_TEAM": "Final",
+            "FINAL_OPP": "Final (Opp)",
+        })
+        show_table(games_df, height=175)
+
+    tech_note(
+        "A comeback is trailing after three quarters and still winning the game."
     )
-
-    games_df = pd.DataFrame(games)
-    games_df["Date"] = pd.to_datetime(games_df["GAME_DATE"]).dt.strftime("%m/%d")
-    # Strip the selected team's own abbreviation, leaving just the opponent.
-    games_df["Opponent"] = games_df["MATCHUP"].str.split("vs.").str[-1].str.strip()
-    games_df = games_df[
-        ["Date", "Opponent", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
-    ].rename(columns={
-        "DEFICIT_AFTER_Q3": "Q3 Deficit",
-        "FINAL_TEAM": "Final",
-        "FINAL_OPP": "Final (Opp)",
-    })
-    show_table(games_df, height=175)
 
 
 @st.cache_data(ttl=86400)
@@ -312,10 +313,6 @@ def render_effort_narrative(team_name, info, league_avg):
         f"{score:.0%} vs. {league_avg:.0%} (League Average)",
         delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
-    tech_note(
-        "100% means they compete equally hard whether winning or losing, "
-        "below 100% means the effort drops off once games go bad."
-    )
 
     # Flag a season that is (or ties) this team's lowest across our data. Only
     # meaningful with more than one season and scores that actually vary.
@@ -329,17 +326,21 @@ def render_effort_narrative(team_name, info, league_avg):
             )
 
     components = info.get("components") or {}
-    if not components:
-        return
+    if components:
+        # Kept numeric (not a "%" string) so the grid still sorts these properly.
+        comp_df = pd.DataFrame(
+            [
+                {"Metric": EFFORT_COMPONENT_LABELS.get(k, k),
+                 "% of Winning Effort": round(v * 100)}
+                for k, v in components.items()
+            ]
+        ).sort_values("% of Winning Effort")
+        show_table(comp_df, height=175)
 
-    # Kept numeric (not a "%" string) so the grid still sorts these properly.
-    comp_df = pd.DataFrame(
-        [
-            {"Metric": EFFORT_COMPONENT_LABELS.get(k, k), "% of Winning Effort": round(v * 100)}
-            for k, v in components.items()
-        ]
-    ).sort_values("% of Winning Effort")
-    show_table(comp_df, height=175)
+    tech_note(
+        "100% means they compete equally hard whether winning or losing, "
+        "below 100% means the effort drops off once games go bad."
+    )
 
 
 def render_hot_starts_narrative(team_name, info, league_avg):
@@ -352,31 +353,41 @@ def render_hot_starts_narrative(team_name, info, league_avg):
         f"{q1_pct:.0%} vs. {league_avg:.0%} (League Average)",
         delta=f"{(q1_pct - league_avg) * 100:+.0f} pts",
     )
-    tech_note("Share of games this team led after the first quarter.")
 
-    conditional = info.get("h1_lead_after_q1_lead_pct")
-    lift = info.get("lift_pts")
-    if conditional is not None and lift is not None:
-        # Some of this pairing is baked in, since the first quarter is part of
-        # the half. The lift against the team's own halftime rate is the part
-        # that actually says whether good starts hold up.
-        holds = "holds onto" if lift >= 0 else "gives back"
+    # First quarter and halftime read as two separate observations: how often
+    # the start happens, then what becomes of it.
+    st.caption(
+        f"First quarter: {team_name} led by {MIN_LEAD}+ after one quarter in "
+        f"{q1_pct:.0%} of its games ({info['q1_leads']} of {info['games']})."
+    )
+
+    held_pct = info.get("held_pct")
+    if held_pct is not None:
+        kept = "kept" if held_pct >= 0.5 else "gave back"
         st.caption(
-            f"{team_name} {holds} the start: leading at halftime in "
-            f"{conditional:.0%} of the games it won the first quarter, against "
-            f"{info['h1_lead_pct']:.0%} of all its games ({lift:+.1f} pts)."
+            f"Halftime: it {kept} the start, carrying a lead at least that big "
+            f"into halftime in {held_pct:.0%} of them "
+            f"({info['held']} of {info['q1_leads']})."
         )
 
     starts_df = pd.DataFrame(
         [
-            {"Split": "Led after Q1", "Games": info["q1_leads"], "Rate": round(q1_pct * 100)},
-            {"Split": "Led at halftime", "Games": info["h1_leads"],
+            {"Split": f"Led by {MIN_LEAD}+ after Q1", "Games": info["q1_leads"],
+             "Rate": round(q1_pct * 100)},
+            {"Split": f"Led by {MIN_LEAD}+ at halftime", "Games": info["h1_leads"],
              "Rate": round(info["h1_lead_pct"] * 100)},
-            {"Split": "Both", "Games": info["h1_lead_after_q1_lead"],
-             "Rate": round(conditional * 100) if conditional is not None else None},
+            {"Split": "Held the Q1 lead", "Games": info.get("held"),
+             "Rate": round(held_pct * 100) if held_pct is not None else None},
         ]
     )
     show_table(starts_df, height=140)
+
+    tech_note(
+        f"A start counts only at {MIN_LEAD} points or more, since a one-point "
+        "edge after twelve minutes is noise. Held means the halftime lead was "
+        "at least as big as the first-quarter one, so a start that gets "
+        "whittled away doesn't count."
+    )
 
 
 def _fgm_band(mean, spread):
@@ -397,25 +408,26 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of,
     band = _fgm_band(base.get("fgm"), base.get("fgm_stdev"))
     league_band = _fgm_band(league_fgm, league_fgm_stdev)
 
+    # Streaky vs. steady is judged on eFG% swing, not on the width of the band:
+    # makes per game also move with pace and attempts, while eFG% isolates how
+    # much the shooting itself wobbles. delta_color inverts for streaky so the
+    # bubble reads red without needing a minus sign.
+    streaky = stdev is not None and stdev > league_avg
     if band and league_band:
-        # Streaky vs. steady is judged on eFG% swing, not on the width of the
-        # band above: makes per game also move with pace and attempts, while
-        # eFG% isolates how much the shooting itself wobbles. delta_color
-        # inverts for streaky so the bubble reads red without a minus sign.
-        streaky = stdev is not None and stdev > league_avg
-        st.metric(
-            "Shooting Variance",
-            f"FGM: {band} vs. FGM {league_band} (League Average)",
-            delta="Streaky" if streaky else "Stable",
-            delta_color="inverse" if streaky else "normal",
-        )
-        tech_note(
-            "Made shots on a typical night, one standard deviation either side "
-            "of this team's average. Streaky or stable is set by game-to-game "
-            "swing in eFG%, in points, against the league average: higher means "
-            "streakier, so a cold week says less about this team than about a "
-            "steady one."
-        )
+        headline = f"FGM: {band} vs. FGM {league_band} (League Average)"
+    elif stdev is not None:
+        # Older stored data predates the FGM fields. Fall back to the swing
+        # itself rather than dropping the title and headline entirely.
+        headline = f"{stdev:.1f} vs. {league_avg:.1f} (League Average)"
+    else:
+        headline = "Not available"
+
+    st.metric(
+        "Shooting Variance",
+        headline,
+        delta=("Streaky" if streaky else "Stable") if stdev is not None else None,
+        delta_color="inverse" if streaky else "normal",
+    )
 
     # What the season says to expect, before looking at the recent form below.
     if base.get("efg_pct") is not None:
@@ -432,27 +444,33 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of,
         st.caption(expected)
 
     windows = info.get("windows") or {}
-    if not windows:
-        return
-
-    rows = []
-    for label, w in windows.items():
-        rows.append({
-            "Window": label,
-            "Games": w["games"],
-            "eFG%": round(w["efg_pct"] * 100, 1),
-            "vs. Season": w["efg_delta_pts"],
-            "Swings": w.get("swings"),
-        })
-    show_table(pd.DataFrame(rows), height=140)
-    tech_note(
-        "Swings is that window's gap measured in this team's own standard "
-        "deviations: around 1.0 is an ordinary hot or cold stretch, 2.0 or more "
-        "is a genuine outlier rather than noise."
-    )
+    if windows:
+        rows = []
+        for label, w in windows.items():
+            rows.append({
+                "Window": label,
+                "Games": w["games"],
+                "eFG%": round(w["efg_pct"] * 100, 1),
+                "vs. Season": w["efg_delta_pts"],
+                "Swings": w.get("swings"),
+            })
+        show_table(pd.DataFrame(rows), height=140)
 
     if as_of:
         st.caption(f"Through games of {as_of}.")
+
+    tech_note(
+        "Made shots on a typical night, one standard deviation either side of "
+        "this team's average. Streaky or stable is set by game-to-game swing in "
+        "eFG%, in points, against the league average: higher means streakier, so "
+        "a cold week says less about this team than about a steady one."
+    )
+    if windows:
+        tech_note(
+            "Swings is that window's gap measured in this team's own standard "
+            "deviations: around 1.0 is an ordinary hot or cold stretch, 2.0 or "
+            "more is a genuine outlier rather than noise."
+        )
 
 
 # Page setup 
