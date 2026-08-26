@@ -43,6 +43,9 @@ EFFORT_COMPONENT_LABELS = {
 # Mirrors MIN_LEAD in analytics/GetHotStarts.py, which defines the stat.
 MIN_LEAD = 5
 
+# Shortest first, so "recent form" reads from the tightest window that has games.
+SHOOTING_WINDOWS = ("1 Week", "2 Weeks", "3 Weeks")
+
 BASIC_LOWER_IS_BETTER = {"TOV", "PF"}
 ADV_LOWER_IS_BETTER   = {"DRTG", "TOV%"}
 
@@ -231,13 +234,49 @@ def team_comeback_counts(team_name):
 
 
 def tech_note(text):
-    """Render a technical blurb: what the metric means and how to read it.
+    """A technical blurb: what the metric means and how to read it.
 
-    These are body text (white) so the definition of the stat carries the same
-    weight as the number. Team-specific observations stay st.caption gray.
+    Gray, so the definitions sit back from the observations about the team.
+    """
+    st.caption(text)
+
+
+def insight(text):
+    """An observation about this particular team, in body white.
+
+    These carry the actual news on the card, so they read at full weight while
+    the tech_note definitions stay gray behind them.
     """
     st.markdown(
         f"<p style='font-size:0.9rem; margin:0.25rem 0 0.5rem 0;'>{text}</p>",
+        unsafe_allow_html=True,
+    )
+
+
+# Streamlit's own delta colors, reused so hand-rolled bubbles match the ones
+# st.metric renders on the other cards.
+_BUBBLE_GREEN = "rgb(9, 171, 59)"
+_BUBBLE_RED = "rgb(255, 43, 43)"
+
+
+def bubbles(items):
+    """Render delta-style pills: [(text, good_or_bad), ...].
+
+    st.metric only takes one delta, and it picks the arrow direction from the
+    sign of the string, so "Streaky" can't point down without literally showing
+    a minus. Rendering the pills directly gives both the second bubble and the
+    arrow that actually matches the meaning.
+    """
+    spans = []
+    for text, good in items:
+        color = _BUBBLE_GREEN if good else _BUBBLE_RED
+        arrow = "&#9650;" if good else "&#9660;"
+        spans.append(
+            f"<span style='color:{color}; font-size:0.875rem; "
+            f"margin-right:0.75rem; white-space:nowrap;'>{arrow} {text}</span>"
+        )
+    st.markdown(
+        f"<div style='margin:-0.5rem 0 0.5rem 0;'>{''.join(spans)}</div>",
         unsafe_allow_html=True,
     )
 
@@ -256,7 +295,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     if len(history) > 1:
         lo, hi = min(history.values()), max(history.values())
         if team_count == lo < hi:
-            st.caption(
+            insight(
                 f"Historic low: fewest comebacks for {team_name} "
                 f"in our {len(history)} seasons of data."
             )
@@ -265,7 +304,7 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         # Biggest comeback this season: the largest Q3 deficit this team erased.
         biggest = max(games, key=lambda g: g["DEFICIT_AFTER_Q3"])
         big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
-        st.caption(
+        insight(
             f"Biggest comeback this season: "
             f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp}."
         )
@@ -320,7 +359,7 @@ def render_effort_narrative(team_name, info, league_avg):
     if len(history) > 1:
         lo, hi = min(history.values()), max(history.values())
         if score == lo < hi:
-            st.caption(
+            insight(
                 f"Historic low, least effort in losses for {team_name} "
                 f"in our {len(history)} seasons of data."
             )
@@ -356,7 +395,7 @@ def render_hot_starts_narrative(team_name, info, league_avg):
 
     # First quarter and halftime read as two separate observations: how often
     # the start happens, then what becomes of it.
-    st.caption(
+    insight(
         f"First quarter: {team_name} led by {MIN_LEAD}+ after one quarter in "
         f"{q1_pct:.0%} of its games ({info['q1_leads']} of {info['games']})."
     )
@@ -364,7 +403,7 @@ def render_hot_starts_narrative(team_name, info, league_avg):
     held_pct = info.get("held_pct")
     if held_pct is not None:
         kept = "kept" if held_pct >= 0.5 else "gave back"
-        st.caption(
+        insight(
             f"Halftime: it {kept} the start, carrying a lead at least that big "
             f"into halftime in {held_pct:.0%} of them "
             f"({info['held']} of {info['q1_leads']})."
@@ -397,8 +436,7 @@ def _fgm_band(mean, spread):
     return f"{round(mean - spread)}-{round(mean + spread)}"
 
 
-def render_shooting_variance_narrative(team_name, info, league_avg, as_of,
-                                       league_fgm, league_fgm_stdev):
+def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
     """Render the shooting-variance narrative: the band of made shots a team
     lands in on a typical night against the league's, whether that band is
     streaky or steady, and how the last one, two, and three weeks compare."""
@@ -406,28 +444,43 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of,
     base = info.get("baseline") or {}
 
     band = _fgm_band(base.get("fgm"), base.get("fgm_stdev"))
-    league_band = _fgm_band(league_fgm, league_fgm_stdev)
+    efg = base.get("efg_pct")
 
-    # Streaky vs. steady is judged on eFG% swing, not on the width of the band:
-    # makes per game also move with pace and attempts, while eFG% isolates how
-    # much the shooting itself wobbles. delta_color inverts for streaky so the
-    # bubble reads red without needing a minus sign.
-    streaky = stdev is not None and stdev > league_avg
-    if band and league_band:
-        headline = f"FGM: {band} vs. FGM {league_band} (League Average)"
-    elif stdev is not None:
-        # Older stored data predates the FGM fields. Fall back to the swing
-        # itself rather than dropping the title and headline entirely.
-        headline = f"{stdev:.1f} vs. {league_avg:.1f} (League Average)"
+    # Season-wide headline: the efficiency, with the band of makes it usually
+    # produces. Older stored data predates the FGM fields, so fall back to the
+    # efficiency alone rather than dropping the title and headline entirely.
+    if efg is not None and band:
+        headline = f"{efg:.1%} eFG% ({band} FGM)"
+    elif efg is not None:
+        headline = f"{efg:.1%} eFG%"
     else:
         headline = "Not available"
 
-    st.metric(
-        "Shooting Variance",
-        headline,
-        delta=("Streaky" if streaky else "Stable") if stdev is not None else None,
-        delta_color="inverse" if streaky else "normal",
-    )
+    st.metric("Shooting Variance", headline)
+
+    # Streaky vs. steady is judged on eFG% swing, not on the width of the band:
+    # makes per game also move with pace and attempts, while eFG% isolates how
+    # much the shooting itself wobbles. Streaky points down, since a team you
+    # can't count on from night to night is the worse thing to be.
+    pills = []
+    if stdev is not None:
+        streaky = stdev > league_avg
+        pills.append(("Streaky" if streaky else "Stable", not streaky))
+
+    # Recent form comes from the shortest window available, falling back to the
+    # direction of the run the team is currently on.
+    windows = info.get("windows") or {}
+    streaks = info.get("streaks") or {}
+    recent = next((windows[label] for label in SHOOTING_WINDOWS if label in windows), None)
+    if recent is not None and recent.get("efg_delta_pts") is not None:
+        hot = recent["efg_delta_pts"] >= 0
+        pills.append((f"Recently: {'Hot' if hot else 'Cold'}", hot))
+    elif streaks.get("current_direction"):
+        hot = streaks["current_direction"] == "hot"
+        pills.append((f"Recently: {'Hot' if hot else 'Cold'}", hot))
+
+    if pills:
+        bubbles(pills)
 
     # What the season says to expect, before looking at the recent form below.
     if base.get("efg_pct") is not None:
@@ -441,35 +494,58 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of,
                 f"({base['open_share_percentile']}th percentile), and they shoot "
                 f"{base['open_efg_pct']:.1%} on them."
             )
-        st.caption(expected)
+        insight(expected)
 
-    windows = info.get("windows") or {}
     if windows:
         rows = []
         for label, w in windows.items():
+            delta = w["efg_delta_pts"]
             rows.append({
                 "Window": label,
                 "Games": w["games"],
                 "eFG%": round(w["efg_pct"] * 100, 1),
-                "vs. Season": w["efg_delta_pts"],
+                "vs. Season (pts)": delta,
                 "Swings": w.get("swings"),
+                "Form": "Hot" if delta >= 0 else "Cold",
             })
         show_table(pd.DataFrame(rows), height=140)
 
+    # Run lengths, and what usually follows a game on the current side. For most
+    # teams this lands near a coin flip, which is the honest answer.
+    if streaks.get("repeat_pct") is not None:
+        direction = streaks["current_direction"]
+        repeat = streaks["repeat_pct"]
+        if repeat >= 0.55:
+            outlook = f"the next one leans {direction} at {repeat:.0%}"
+        elif repeat <= 0.45:
+            outlook = (
+                f"the next one actually leans "
+                f"{'cold' if direction == 'hot' else 'hot'} at {1 - repeat:.0%}"
+            )
+        else:
+            outlook = f"the next one is close to a coin flip at {repeat:.0%}"
+        insight(
+            f"Hot and cold runs last {streaks['avg_length']} games on average "
+            f"(longest {streaks['longest']}). {team_name} is on a "
+            f"{streaks['current_length']}-game {direction} run, and historically "
+            f"{outlook}."
+        )
+
     if as_of:
-        st.caption(f"Through games of {as_of}.")
+        insight(f"Through games of {as_of}.")
 
     tech_note(
-        "Made shots on a typical night, one standard deviation either side of "
-        "this team's average. Streaky or stable is set by game-to-game swing in "
-        "eFG%, in points, against the league average: higher means streakier, so "
-        "a cold week says less about this team than about a steady one."
+        "Season eFG% with the band of made shots it usually produces, one "
+        "standard deviation either side of this team's average. Streaky or "
+        "stable is set by game-to-game swing in eFG%, in points, against the "
+        "league average: higher means streakier, so a cold week says less about "
+        "this team than about a steady one."
     )
     if windows:
         tech_note(
-            "Swings is that window's gap measured in this team's own standard "
-            "deviations: around 1.0 is an ordinary hot or cold stretch, 2.0 or "
-            "more is a genuine outlier rather than noise."
+            "Swings puts that window on a 0 to 2 scale in this team's own "
+            "standard deviations: 0 is cold, 1 is normal, 2 is hot. vs. Season "
+            "is the same gap in eFG percentage points."
         )
 
 
@@ -598,15 +674,12 @@ with right:
                 sv_teams = shooting.get("teams", {}) or {}
                 sv_avg   = shooting.get("league_average", 0)
                 sv_as_of = shooting.get("as_of")
-                sv_fgm   = shooting.get("league_fgm")
-                sv_fgm_sd = shooting.get("league_fgm_stdev")
                 sv_info  = sv_teams.get(selected_team)
 
                 if sv_info:
                     narratives.append(
                         lambda: render_shooting_variance_narrative(
-                            selected_team, sv_info, sv_avg, sv_as_of,
-                            sv_fgm, sv_fgm_sd
+                            selected_team, sv_info, sv_avg, sv_as_of
                         )
                     )
 

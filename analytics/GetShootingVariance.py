@@ -34,7 +34,7 @@ OPEN_RANGES = ("4-6 Feet - Open", "6+ Feet - Wide Open")
 # Bump whenever the stored shape changes. Finished seasons are normally left
 # alone once written, so precompute uses this to tell a stale file from a
 # current one and regenerate it.
-SCHEMA = 2
+SCHEMA = 3
 
 
 def _retry(fetch, retries=4, pause=1.0):
@@ -58,6 +58,60 @@ def _efg(fgm, fg3m, fga):
     if not fga:
         return None
     return float((fgm + 0.5 * fg3m) / fga)
+
+
+def _swings(gap, stdev):
+    """Recent form on a 0 to 2 scale: 0 is cold, 1 is normal, 2 is hot.
+
+    The window's gap is measured in the team's own standard deviations and then
+    centered on 1, so a team shooting exactly its season average reads 1.00 and
+    a full standard deviation either way reads 0 or 2. Beyond that the scale
+    clamps: past one standard deviation the label stops changing, and the raw
+    gap in points is reported alongside it anyway.
+    """
+    if not stdev:
+        return None
+    return round(max(0.0, min(2.0, 1 + gap / stdev)), 2)
+
+
+def _streaks(games, baseline_efg):
+    """Hot and cold run lengths, plus how often a run continues.
+
+    A game is hot when its eFG% beats the team's season mark and cold when it
+    doesn't. `repeat_pct` is the share of games following a game on the current
+    side that stayed on that side, which is the honest version of "is the next
+    one likely hot": for most teams it lands near a coin flip, and saying so is
+    more useful than implying the streak predicts anything.
+    """
+    if baseline_efg is None or len(games) < 2:
+        return None
+
+    ordered = games.sort_values("GAME_DATE")
+    sides = ["hot" if efg > baseline_efg else "cold" for efg in ordered["EFG"]]
+
+    # Run lengths, in order.
+    runs = []
+    for side in sides:
+        if runs and runs[-1][0] == side:
+            runs[-1][1] += 1
+        else:
+            runs.append([side, 1])
+
+    direction = runs[-1][0]
+    # How often a game on this side is followed by another on the same side.
+    same, total = 0, 0
+    for current, nxt in zip(sides, sides[1:]):
+        if current == direction:
+            total += 1
+            same += int(nxt == direction)
+
+    return {
+        "avg_length": round(sum(r[1] for r in runs) / len(runs), 1),
+        "longest": max(r[1] for r in runs),
+        "current_direction": direction,
+        "current_length": runs[-1][1],
+        "repeat_pct": round(same / total, 3) if total else None,
+    }
 
 
 def _percentiles(values):
@@ -135,17 +189,24 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
                     "windows": {
                         "1 Week": {"games": 3, "efg_pct": 0.512,
                                    "efg_delta_pts": -3.6, "fga": 90.0,
-                                   "fg3a": 39.3, "swings": -0.78},
+                                   "fg3a": 39.3, "swings": 0.22},
                         ...
+                    },
+                    "streaks": {
+                        "avg_length": 1.8,   # mean hot or cold run, in games
+                        "longest": 6,
+                        "current_direction": "hot",
+                        "current_length": 3,
+                        "repeat_pct": 0.51,  # a run continuing, historically
                     },
                 },
                 ...
             },
         }
 
-    `swings` is the window's eFG% gap expressed in standard deviations of that
-    team's own game-to-game shooting, so "cold" can be judged against how
-    streaky the team normally is. A window with no games is omitted.
+    `swings` puts the window's eFG% gap on a 0 to 2 scale in standard
+    deviations of that team's own game-to-game shooting: 0 is cold, 1 is
+    normal, 2 is hot. A window with no games is omitted.
 
     An empty `teams` dict means the game logs couldn't be fetched. Callers
     should treat that as "skip this stat", not as an error.
@@ -234,7 +295,7 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
                 "efg_delta_pts": round(gap * 100, 1),
                 "fga": round(w_fga / played, 1),
                 "fg3a": round(w_fg3a / played, 1),
-                "swings": round(gap / stdev, 2) if stdev else None,
+                "swings": _swings(gap, stdev),
             }
 
         teams[team_name] = {
@@ -258,6 +319,7 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
                 ),
             },
             "windows": windows,
+            "streaks": _streaks(games, base["efg_pct"]),
         }
 
     def _mean(values):
