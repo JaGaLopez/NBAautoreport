@@ -182,6 +182,9 @@ def load_data(season):
     sv_resp = requests.get(f"{API_URL}/teams/{season}/shooting-variance")
     shooting = sv_resp.json() if sv_resp.ok else None
 
+    tp_resp = requests.get(f"{API_URL}/teams/{season}/three-point-variance")
+    threes = tp_resp.json() if tp_resp.ok else None
+
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
@@ -197,6 +200,7 @@ def load_data(season):
         effort,
         hot_starts,
         shooting,
+        threes,
     )
 
 
@@ -471,6 +475,35 @@ def _fgm_band(mean, spread):
     return f"{round(mean - spread)}-{round(mean + spread)}"
 
 
+def streak_insight(team_name, streaks):
+    """Run lengths, and what usually follows a game on the current side.
+
+    For most teams this lands near a coin flip, which is the honest answer, so
+    the wording only claims a lean when the base rate actually shows one.
+    """
+    if not streaks or streaks.get("repeat_pct") is None:
+        return
+
+    direction = streaks["current_direction"]
+    repeat = streaks["repeat_pct"]
+    if repeat >= 0.55:
+        outlook = f"the next one leans {direction} at {repeat:.0%}"
+    elif repeat <= 0.45:
+        outlook = (
+            f"the next one actually leans "
+            f"{'cold' if direction == 'hot' else 'hot'} at {1 - repeat:.0%}"
+        )
+    else:
+        outlook = f"the next one is close to a coin flip at {repeat:.0%}"
+
+    insight(
+        f"Hot and cold runs last {streaks['avg_length']} games on average "
+        f"(longest {streaks['longest']}). {team_name} is on a "
+        f"{streaks['current_length']}-game {direction} run, and historically "
+        f"{outlook}."
+    )
+
+
 def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
     """Render the shooting-variance narrative: the band of made shots a team
     lands in on a typical night against the league's, whether that band is
@@ -548,26 +581,7 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
         windows_df = pd.DataFrame(rows).dropna(axis=1, how="all")
         show_table(windows_df, height=140, fit_width=True)
 
-    # Run lengths, and what usually follows a game on the current side. For most
-    # teams this lands near a coin flip, which is the honest answer.
-    if streaks.get("repeat_pct") is not None:
-        direction = streaks["current_direction"]
-        repeat = streaks["repeat_pct"]
-        if repeat >= 0.55:
-            outlook = f"the next one leans {direction} at {repeat:.0%}"
-        elif repeat <= 0.45:
-            outlook = (
-                f"the next one actually leans "
-                f"{'cold' if direction == 'hot' else 'hot'} at {1 - repeat:.0%}"
-            )
-        else:
-            outlook = f"the next one is close to a coin flip at {repeat:.0%}"
-        insight(
-            f"Hot and cold runs last {streaks['avg_length']} games on average "
-            f"(longest {streaks['longest']}). {team_name} is on a "
-            f"{streaks['current_length']}-game {direction} run, and historically "
-            f"{outlook}."
-        )
+    streak_insight(team_name, streaks)
 
     if as_of:
         insight(f"Through games of {as_of}.")
@@ -582,7 +596,90 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
             "Swings are a personalized stat, how far a team is off their own "
             "baseline. 1 is normal, 0 is cold, 2 is hot, past those is more extreme."
         )
-        
+
+
+def render_three_point_variance_narrative(team_name, info, league_avg, as_of):
+    """Render the three-point variance narrative: the same shape as shooting
+    variance, restricted to the arc, where most of the night-to-night swing
+    actually comes from."""
+    stdev = info.get("fg3_stdev")
+    base = info.get("baseline") or {}
+
+    band = _fgm_band(base.get("fg3m"), base.get("fg3m_stdev"))
+    pct = base.get("fg3_pct")
+
+    if pct is not None and band:
+        headline = f"{pct:.1%} 3P% ({band} 3PM)"
+    elif pct is not None:
+        headline = f"{pct:.1%} 3P%"
+    else:
+        headline = "Not available"
+
+    st.metric("Three Point Variance", headline)
+
+    pills = []
+    if stdev is not None:
+        streaky = stdev > league_avg
+        pills.append(("Streaky" if streaky else "Stable", not streaky))
+
+    windows = info.get("windows") or {}
+    streaks = info.get("streaks") or {}
+    recent = next((windows[label] for label in SHOOTING_WINDOWS if label in windows), None)
+    if recent is not None and recent.get("fg3_delta_pts") is not None:
+        hot = recent["fg3_delta_pts"] >= 0
+        pills.append((f"Recently: {'Hot' if hot else 'Cold'}", hot))
+    elif streaks.get("current_direction"):
+        hot = streaks["current_direction"] == "hot"
+        pills.append((f"Recently: {'Hot' if hot else 'Cold'}", hot))
+
+    if pills:
+        bubbles(pills)
+
+    if pct is not None:
+        expected = (
+            f"Expected: {pct:.1%} from three on {base['fg3a']:.0f} attempts per "
+            f"game, {_ordinal(base['fg3_percentile'])} percentile in the league."
+        )
+        if base.get("open_share") is not None:
+            expected += (
+                f" {base['open_share']:.0%} of those threes are open or wide open "
+                f"({_ordinal(base['open_share_percentile'])} percentile), and they "
+                f"shoot {base['open_fg3_pct']:.1%} on them."
+            )
+        insight(expected)
+
+    if windows:
+        rows = []
+        for label, w in windows.items():
+            delta = w["fg3_delta_pts"]
+            rows.append({
+                "Window": label,
+                "Games": w["games"],
+                "3P%": round(w["fg3_pct"] * 100, 1),
+                "3PM vs. Avg": w.get("fg3m_delta"),
+                "Swings": w.get("swings"),
+                "Form": "Hot" if delta >= 0 else "Cold",
+            })
+        show_table(pd.DataFrame(rows).dropna(axis=1, how="all"),
+                   height=140, fit_width=True)
+
+    streak_insight(team_name, streaks)
+
+    if as_of:
+        insight(f"Through games of {as_of}.")
+
+    tech_note(
+        "Season 3P% with the range of threes made (one std). Streaky or stable "
+        "is set by game-to-game swing in 3P%, in points, against the league "
+        "average. Threes are where most of a team's shooting noise lives, so "
+        "this swings wider than overall shooting for everyone."
+    )
+    if windows:
+        tech_note(
+            "Swings are a personalized stat, how far a team is off their own "
+            "baseline. 1 is normal, 0 is cold, 2 is hot, past those is more extreme."
+        )
+
 
 
 # Page setup 
@@ -626,7 +723,7 @@ if data is None:
     st.warning(f"Stats for {season} haven't been precomputed yet. Try another season.")
     st.stop()
 
-basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting = data
+basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting, threes = data
 
 # Layout
 # One column pair, with each side stacking its own content. Two separate
@@ -742,6 +839,19 @@ with right:
                     narratives.append(
                         lambda: render_shooting_variance_narrative(
                             selected_team, sv_info, sv_avg, sv_as_of
+                        )
+                    )
+
+            if isinstance(threes, dict):
+                tp_teams = threes.get("teams", {}) or {}
+                tp_avg   = threes.get("league_average", 0)
+                tp_as_of = threes.get("as_of")
+                tp_info  = tp_teams.get(selected_team)
+
+                if tp_info:
+                    narratives.append(
+                        lambda: render_three_point_variance_narrative(
+                            selected_team, tp_info, tp_avg, tp_as_of
                         )
                     )
 

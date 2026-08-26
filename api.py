@@ -54,6 +54,11 @@ def teams_shooting_variance(season: str):
     return _cached(f"{season}_shooting.json")
 
 
+@app.get("/teams/{season}/three-point-variance")
+def teams_three_point_variance(season: str):
+    return _cached(f"{season}_threepoint.json")
+
+
 @app.get("/teams/{season}")
 def teams(season: str):
     return _cached(f"{season}_basic.json")

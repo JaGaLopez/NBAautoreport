@@ -20,6 +20,7 @@ from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
 from analytics.GetEffortWhileLosing import GetEffortWhileLosing
 from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTING_SCHEMA
+from analytics.GetThreePointVariance import GetThreePointVariance, SCHEMA as THREEPOINT_SCHEMA
 from analytics.LineScores import iter_line_scores
 from analytics import GetQ4Comebacks as comebacks
 from analytics import GetHotStarts as hotstarts
@@ -61,6 +62,7 @@ def _season_complete(season):
 # regenerate for any completed season.
 DATASET_SCHEMA = {
     "shooting": SHOOTING_SCHEMA,
+    "threepoint": THREEPOINT_SCHEMA,
     "hotstarts": HOTSTARTS_SCHEMA,
     # Comebacks deliberately has no schema. Its stored files are valid and cost
     # a full crawl to rebuild, so it keeps the older league_average check below.
@@ -115,6 +117,8 @@ CORE_DATASETS = (
     ("effort",        lambda s: GetEffortWhileLosing(s)),
     # One game-log call for the whole league plus two shot-tracking calls.
     ("shooting",      lambda s: GetShootingVariance(s)),
+    # Same three calls again, from behind the arc only.
+    ("threepoint",    lambda s: GetThreePointVariance(s)),
 )
 
 # Datasets built from the season's line scores. They share a single crawl

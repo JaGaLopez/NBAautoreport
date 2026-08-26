@@ -74,20 +74,22 @@ def _swings(gap, stdev):
     return round(max(0.0, min(2.0, 1 + gap / stdev)), 2)
 
 
-def _streaks(games, baseline_efg):
+def _streaks(games, baseline_rate, column="EFG"):
     """Hot and cold run lengths, plus how often a run continues.
 
-    A game is hot when its eFG% beats the team's season mark and cold when it
+    A game is hot when its rate beats the team's season mark and cold when it
     doesn't. `repeat_pct` is the share of games following a game on the current
     side that stayed on that side, which is the honest version of "is the next
     one likely hot": for most teams it lands near a coin flip, and saying so is
     more useful than implying the streak predicts anything.
+
+    `column` picks the per-game rate, so the three-point stat can reuse this.
     """
-    if baseline_efg is None or len(games) < 2:
+    if baseline_rate is None or len(games) < 2:
         return None
 
     ordered = games.sort_values("GAME_DATE")
-    sides = ["hot" if efg > baseline_efg else "cold" for efg in ordered["EFG"]]
+    sides = ["hot" if rate > baseline_rate else "cold" for rate in ordered[column]]
 
     # Run lengths, in order.
     runs = []
