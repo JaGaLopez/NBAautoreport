@@ -37,11 +37,6 @@ def _retry(fetch, retries=4, pause=1.0):
 
 
 def _team_frame(frames):
-    """Pick the frame that actually holds per-team rows.
-
-    Some hustle responses lead with a status/metadata frame, so index 0 isn't
-    reliably the team table.
-    """
     for df in frames:
         if df is not None and "TEAM_ID" in df.columns and not df.empty:
             return df
