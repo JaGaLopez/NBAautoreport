@@ -34,7 +34,7 @@ OPEN_RANGES = ("4-6 Feet - Open", "6+ Feet - Wide Open")
 # Bump whenever the stored shape changes. Finished seasons are normally left
 # alone once written, so precompute uses this to tell a stale file from a
 # current one and regenerate it.
-SCHEMA = 3
+SCHEMA = 5
 
 
 def _retry(fetch, retries=4, pause=1.0):
@@ -188,7 +188,8 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
                     },
                     "windows": {
                         "1 Week": {"games": 3, "efg_pct": 0.512,
-                                   "efg_delta_pts": -3.6, "fga": 90.0,
+                                   "efg_delta_pts": -3.6, "fgm": 38.7,
+                                   "fgm_delta": -2.8, "fga": 90.0,
                                    "fg3a": 39.3, "swings": 0.22},
                         ...
                     },
@@ -293,6 +294,11 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
                 "games": played,
                 "efg_pct": round(w_efg, 3),
                 "efg_delta_pts": round(gap * 100, 1),
+                "fgm": round(w_fgm / played, 1),
+                # Normalized against the team's own season average, so the
+                # column reads as makes gained or lost per game rather than a
+                # raw count that means nothing without the baseline alongside.
+                "fgm_delta": round(w_fgm / played - base["fgm"], 1),
                 "fga": round(w_fga / played, 1),
                 "fg3a": round(w_fg3a / played, 1),
                 "swings": _swings(gap, stdev),

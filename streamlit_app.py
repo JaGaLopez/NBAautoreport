@@ -509,7 +509,7 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
                 "Window": label,
                 "Games": w["games"],
                 "eFG%": round(w["efg_pct"] * 100, 1),
-                "vs. Season (FG%)": delta,
+                "FGM vs. Avg": w.get("fgm_delta"),
                 "Swings": w.get("swings"),
                 "Form": "Hot" if delta >= 0 else "Cold",
             })
@@ -549,8 +549,9 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
     if windows:
         tech_note(
             "Swings puts that window on a 0 to 2 scale in this team's own "
-            "standard deviations: 0 is cold, 1 is normal, 2 is hot. vs. Season "
-            "is the same gap in eFG percentage points."
+            "standard deviations: 0 is cold, 1 is normal, 2 is hot. FGM vs. Avg "
+            "is made shots per game in that window against this team's own "
+            "season average, so negative means fewer makes a night than usual."
         )
         tech_note(
             "Streaky points down because a team you can't count on night to "
