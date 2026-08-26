@@ -5,5 +5,5 @@ pandas
 matplotlib
 seaborn
 scikit-learn
-nba_api
+nba_api==1.11.4
 scipy
