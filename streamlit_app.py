@@ -540,24 +540,16 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
         insight(f"Through games of {as_of}.")
 
     tech_note(
-        "Season eFG% with the band of made shots it usually produces, one "
-        "standard deviation either side of this team's average. Streaky or "
-        "stable is set by game-to-game swing in eFG%, in points, against the "
-        "league average: higher means streakier, so a cold week says less about "
-        "this team than about a steady one."
+        "Season eFG% with the range of made shots (one std). Streaky or "
+        "stable is set by week-to-week swing in eFG%, in points, against the "
+        "league average."
     )
     if windows:
         tech_note(
-            "Swings puts that window on a 0 to 2 scale in this team's own "
-            "standard deviations: 0 is cold, 1 is normal, 2 is hot. FGM vs. Avg "
-            "is made shots per game in that window against this team's own "
-            "season average, so negative means fewer makes a night than usual."
+            "Swings are a personalized stat, how far a team is off their own "
+            "baseline. 1 is normal, 0 is cold, 2 is hot, past those is more extreme."
         )
-        tech_note(
-            "Streaky points down because a team you can't count on night to "
-            "night is the harder one to trust, not because shooting variance "
-            "is bad in itself."
-        )
+        
 
 
 # Page setup 

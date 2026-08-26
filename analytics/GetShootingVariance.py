@@ -16,6 +16,7 @@ for a high-variance team and a lot for a steady one.
 
 Cheap: three league-wide calls, no per-game crawl.
 """
+import math
 import time
 import pandas as pd
 from nba_api.stats.endpoints import teamgamelogs, leaguedashteamptshot
@@ -34,7 +35,7 @@ OPEN_RANGES = ("4-6 Feet - Open", "6+ Feet - Wide Open")
 # Bump whenever the stored shape changes. Finished seasons are normally left
 # alone once written, so precompute uses this to tell a stale file from a
 # current one and regenerate it.
-SCHEMA = 5
+SCHEMA = 6
 
 
 def _retry(fetch, retries=4, pause=1.0):
@@ -60,18 +61,23 @@ def _efg(fgm, fg3m, fga):
     return float((fgm + 0.5 * fg3m) / fga)
 
 
-def _swings(gap, stdev):
-    """Recent form on a 0 to 2 scale: 0 is cold, 1 is normal, 2 is hot.
+def _swings(gap, stdev, played):
+    """Recent form centered on 1: 0 is cold, 1 is normal, 2 is hot.
 
-    The window's gap is measured in the team's own standard deviations and then
-    centered on 1, so a team shooting exactly its season average reads 1.00 and
-    a full standard deviation either way reads 0 or 2. Beyond that the scale
-    clamps: past one standard deviation the label stops changing, and the raw
-    gap in points is reported alongside it anyway.
+    The gap is divided by the standard error of the window's average, not by
+    the single-game standard deviation. A run of k games only swings about
+    sd/sqrt(k) around the team's true level, so dividing by the raw sd squashes
+    every window toward 1 and makes 0 and 2 unreachable. Using the standard
+    error puts 0 and 2 at a genuinely cold or hot stretch.
+
+    Deliberately not clamped. Values beyond 0 or 2 are exactly the stretches
+    worth noticing, and capping them would render a collapse identical to an
+    ordinary cold week.
     """
-    if not stdev:
+    if not stdev or not played:
         return None
-    return round(max(0.0, min(2.0, 1 + gap / stdev)), 2)
+    standard_error = stdev / math.sqrt(played)
+    return round(1 + gap / standard_error, 2)
 
 
 def _streaks(games, baseline_efg):
@@ -205,9 +211,10 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
             },
         }
 
-    `swings` puts the window's eFG% gap on a 0 to 2 scale in standard
-    deviations of that team's own game-to-game shooting: 0 is cold, 1 is
-    normal, 2 is hot. A window with no games is omitted.
+    `swings` centers the window's eFG% gap on 1: 0 is cold, 1 is normal, 2 is
+    hot. It is measured in standard errors of that window's average rather than
+    single-game standard deviations, and is not capped, so a genuine outlier
+    runs past 0 or 2. A window with no games is omitted.
 
     An empty `teams` dict means the game logs couldn't be fetched. Callers
     should treat that as "skip this stat", not as an error.
@@ -301,7 +308,7 @@ def GetShootingVariance(SEASON, SEASON_TYPE="Regular Season"):
                 "fgm_delta": round(w_fgm / played - base["fgm"], 1),
                 "fga": round(w_fga / played, 1),
                 "fg3a": round(w_fg3a / played, 1),
-                "swings": _swings(gap, stdev),
+                "swings": _swings(gap, stdev, played),
             }
 
         teams[team_name] = {
