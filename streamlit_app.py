@@ -66,7 +66,8 @@ function(params) {
 DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
 
-def show_table(df, *, double_click=False, cell_style=None, height=None):
+def show_table(df, *, double_click=False, cell_style=None, height=None,
+               pre_selected=None):
     gb = GridOptionsBuilder.from_dataframe(df)
     # suppressColumnVirtualisation so every column (even off-screen ones on wide
     # tables) gets measured and autosized to its content.
@@ -78,7 +79,13 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
         gb.configure_default_column(resizable=True, sortable=True)
 
     if double_click:
-        gb.configure_selection(selection_mode="single", use_checkbox=False)
+        # pre_selected re-applies the shared selection on every rerun, so both
+        # tables highlight the same team instead of each keeping its own.
+        gb.configure_selection(
+            selection_mode="single",
+            use_checkbox=False,
+            pre_selected_rows=pre_selected or [],
+        )
         gb.configure_grid_options(
             suppressRowClickSelection=True,
             onRowDoubleClicked=DOUBLE_CLICK_JS,
@@ -290,11 +297,12 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
     """Render the 4th-quarter-comebacks narrative: the team's total vs. the league
     average (the metric's arrow shows the gap), with a historic-low note and the
     team's comeback games."""
+    gap = round(team_count - league_avg, 1)
     st.metric(
         "Total Comebacks",
         f"{team_count} vs. {round(league_avg, 1)} (League Average)",
-        delta=round(team_count - league_avg, 1),
     )
+    bubbles([(f"{gap:+.1f}", gap >= 0)])
 
     history = team_comeback_counts(team_name)
     if len(history) > 1:
@@ -352,11 +360,12 @@ def render_effort_narrative(team_name, info, league_avg):
     score = info["effort_retention"]
 
 
+    gap = (score - league_avg) * 100
     st.metric(
         "Effort While Losing",
         f"{score:.0%} vs. {league_avg:.0%} (League Average)",
-        delta=f"{(score - league_avg) * 100:+.0f} pts",
     )
+    bubbles([(f"{gap:+.0f} pts", gap >= 0)])
 
     # Flag a season that is (or ties) this team's lowest across our data. Only
     # meaningful with more than one season and scores that actually vary.
@@ -392,11 +401,12 @@ def render_hot_starts_narrative(team_name, info, league_avg):
     quarter, and whether that early lead actually survives to halftime."""
     q1_pct = info["q1_lead_pct"]
 
+    gap = (q1_pct - league_avg) * 100
     st.metric(
         "Hot Starts",
         f"{q1_pct:.0%} vs. {league_avg:.0%} (League Average)",
-        delta=f"{(q1_pct - league_avg) * 100:+.0f} pts",
     )
+    bubbles([(f"{gap:+.0f} pts", gap >= 0)])
 
     # First quarter and halftime read as two separate observations: how often
     # the start happens, then what becomes of it.
@@ -432,6 +442,13 @@ def render_hot_starts_narrative(team_name, info, league_avg):
         "at least as big as the first-quarter one, so a start that gets "
         "whittled away doesn't count."
     )
+
+
+def _ordinal(n):
+    """83 -> '83rd'. Percentiles read as ordinals, and "83th" is jarring."""
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
 
 
 def _fgm_band(mean, spread):
@@ -491,12 +508,12 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
     if base.get("efg_pct") is not None:
         expected = (
             f"Expected: {base['efg_pct']:.1%} eFG% on {base['fga']:.0f} attempts "
-            f"per game, {base['efg_percentile']}th percentile in the league."
+            f"per game, {_ordinal(base['efg_percentile'])} percentile in the league."
         )
         if base.get("open_share") is not None:
             expected += (
                 f" {base['open_share']:.0%} of those looks are open or wide open "
-                f"({base['open_share_percentile']}th percentile), and they shoot "
+                f"({_ordinal(base['open_share_percentile'])} percentile), and they shoot "
                 f"{base['open_efg_pct']:.1%} on them."
             )
         insight(expected)
@@ -509,11 +526,14 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
                 "Window": label,
                 "Games": w["games"],
                 "eFG%": round(w["efg_pct"] * 100, 1),
+                # Absent on data stored before this field existed. Dropped
+                # below rather than rendered as an empty column.
                 "FGM vs. Avg": w.get("fgm_delta"),
                 "Swings": w.get("swings"),
                 "Form": "Hot" if delta >= 0 else "Cold",
             })
-        show_table(pd.DataFrame(rows), height=140)
+        windows_df = pd.DataFrame(rows).dropna(axis=1, how="all")
+        show_table(windows_df, height=140)
 
     # Run lengths, and what usually follows a game on the current side. For most
     # teams this lands near a coin flip, which is the honest answer.
@@ -601,29 +621,55 @@ basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting = data
 # under the basic table whenever the narratives column is taller.
 left, right = st.columns(2)
 
+def row_of(df, team_name):
+    """Row ids to pre-select for a team, as AG Grid expects them.
+
+    These land in gridOptions initialState.rowSelection, which matches on row
+    id rather than position. Without a getRowId the ids are the row index as a
+    string, so an int here silently matches nothing.
+    """
+    if not team_name:
+        return []
+    teams = list(df["Team"])
+    return [str(teams.index(team_name))] if team_name in teams else []
+
+
+# Both tables render pre-selected on the team chosen last run, so a new pick on
+# one table clears the stale highlight on the other instead of leaving two rows
+# lit at once.
+active_team = st.session_state.get("selected_team")
+
 # Render the two selectable source tables first (both double-clickable)
 with left:
     st.caption("Per Game Stats")
-    basic_result = show_table(basic_df, double_click=True)
+    basic_result = show_table(basic_df, double_click=True,
+                              pre_selected=row_of(basic_df, active_team))
 
     st.caption("Advanced Stats")
-    adv_result = show_table(adv_df, double_click=True)
+    adv_result = show_table(adv_df, double_click=True,
+                            pre_selected=row_of(adv_df, active_team))
 
-# Figure out which table the user most recently clicked
+# Figure out which table the user most recently clicked. Both tables come in
+# pre-selected on active_team, so a table reporting anything else is the one
+# just clicked. That is the whole rule, no per-table history needed.
 basic_sel = selected_team_from(basic_result)
 adv_sel   = selected_team_from(adv_result)
 
-selected_team = st.session_state.get("selected_team")
-if basic_sel is not None and basic_sel != st.session_state.get("prev_basic_sel"):
+if basic_sel is not None and basic_sel != active_team:
     selected_team = basic_sel
-elif adv_sel is not None and adv_sel != st.session_state.get("prev_adv_sel"):
+elif adv_sel is not None and adv_sel != active_team:
     selected_team = adv_sel
-elif selected_team is None:
-    selected_team = basic_sel or adv_sel
+else:
+    selected_team = active_team or basic_sel or adv_sel
 
-st.session_state["prev_basic_sel"] = basic_sel
-st.session_state["prev_adv_sel"]   = adv_sel
-st.session_state["selected_team"]  = selected_team
+st.session_state["selected_team"] = selected_team
+
+# The tables above were drawn pre-selected on the previous team, so when the
+# pick changes they need one more pass to move the highlight. This settles
+# immediately: after the rerun the tables agree with active_team and no further
+# rerun is requested.
+if selected_team != active_team:
+    st.rerun()
 
 # Now render the comparison tables on the right
 with right:
