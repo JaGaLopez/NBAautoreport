@@ -20,7 +20,7 @@ MIN_LEAD = 5
 
 # Bump whenever the stored shape changes, so precompute regenerates a finished
 # season's file instead of leaving a stale one in place.
-SCHEMA = 1
+SCHEMA = 2
 
 # The line score crawl is shared with the other stats built on it, so one pass
 # over the season can feed all of them. See analytics/LineScores.py.

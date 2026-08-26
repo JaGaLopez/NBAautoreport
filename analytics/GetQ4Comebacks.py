@@ -7,6 +7,12 @@ from nba_api.stats.static import teams as nba_teams
 # over the season can feed all of them. See analytics/LineScores.py.
 from analytics.LineScores import PAUSE, fetch_line_score, iter_line_scores
 
+# Bump whenever the stored shape or the underlying data changes, so precompute
+# regenerates a finished season instead of trusting a stale file. Raised to 1
+# when the crawl moved to the scoreboard, which recovers the late-season games
+# BoxScoreSummaryV2 returns empty.
+SCHEMA = 1
+
 
 def _pts_after_q3(row):
     """Sum of a team's first three quarters, or None if any are missing.
@@ -142,7 +148,7 @@ def finish(tally):
     """Turn a tally into the stored {league_average, teams} payload."""
     counts = [r["count"] for r in tally.values()]
     league_average = round(sum(counts) / len(counts), 2) if counts else 0
-    return {"league_average": league_average, "teams": tally}
+    return {"schema": SCHEMA, "league_average": league_average, "teams": tally}
 
 
 def GetAllTeamsQ4Comebacks(SEASON):

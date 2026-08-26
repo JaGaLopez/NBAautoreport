@@ -23,6 +23,7 @@ from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTIN
 from analytics.GetThreePointVariance import GetThreePointVariance, SCHEMA as THREEPOINT_SCHEMA
 from analytics.LineScores import iter_line_scores
 from analytics import GetQ4Comebacks as comebacks
+from analytics.GetQ4Comebacks import SCHEMA as COMEBACKS_SCHEMA
 from analytics import GetHotStarts as hotstarts
 from analytics.GetHotStarts import SCHEMA as HOTSTARTS_SCHEMA
 
@@ -64,8 +65,7 @@ DATASET_SCHEMA = {
     "shooting": SHOOTING_SCHEMA,
     "threepoint": THREEPOINT_SCHEMA,
     "hotstarts": HOTSTARTS_SCHEMA,
-    # Comebacks deliberately has no schema. Its stored files are valid and cost
-    # a full crawl to rebuild, so it keeps the older league_average check below.
+    "comebacks": COMEBACKS_SCHEMA,
 }
 
 
