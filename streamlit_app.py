@@ -526,10 +526,7 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
 
     st.metric("Shooting Variance", headline)
 
-    # Streaky vs. steady is judged on eFG% swing, not on the width of the band:
-    # makes per game also move with pace and attempts, while eFG% isolates how
-    # much the shooting itself wobbles. Streaky points down, since a team you
-    # can't count on from night to night is the worse thing to be.
+
     pills = []
     if stdev is not None:
         streaky = stdev > league_avg

@@ -31,7 +31,10 @@ jobs:
       - name: Run precompute (one-shot container, shared data volume)
         run: |
           mkdir -p "$DATA_HOST"
+          # PYTHONUNBUFFERED so progress lines reach the Actions log as they
+          # happen. Without it Python block-buffers stdout when it isn't a
+          # terminal, and a run that is still working looks like a hung one.
           docker run --rm \
             -v "$DATA_HOST":/app/data \
-            -e DATA_DIR=/app/data -e PYTHONPATH=/app -w /app \
-            nbaautoreport python scripts/precompute.py
+            -e DATA_DIR=/app/data -e PYTHONPATH=/app -e PYTHONUNBUFFERED=1 -w /app \
+            nbaautoreport python -u scripts/precompute.py
