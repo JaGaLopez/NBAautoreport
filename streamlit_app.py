@@ -371,7 +371,7 @@ def team_effort_history(team_name):
     return scores
 
 
-def render_effort_narrative(team_name, info, league_avg):
+def render_effort_narrative(team_name, info, league_avg, scored=None):
     """Render the effort-while-losing narrative: how much of its hustle a team
     keeps in losses relative to its own wins, vs. the league average."""
     score = info["effort_retention"]
@@ -411,6 +411,16 @@ def render_effort_narrative(team_name, info, league_avg):
         "100% means they compete equally hard whether winning or losing, "
         "below 100% means the effort drops off once games go bad."
     )
+    # Sparse components are shown but not scored, so say which ones.
+    if scored:
+        unscored = [EFFORT_COMPONENT_LABELS.get(c, c)
+                    for c in (info.get("components") or {}) if c not in scored]
+        if unscored:
+            tech_note(
+                f"{', '.join(unscored)} shown for context but left out of the "
+                "score: teams don't draw enough charges while losing for the "
+                "ratio to mean anything."
+            )
 
 
 def render_hot_starts_narrative(team_name, info, league_avg):
@@ -808,9 +818,10 @@ with right:
                 ef_info  = ef_teams.get(selected_team)
 
                 if ef_info and ef_info.get("effort_retention") is not None:
+                    ef_scored = effort.get("scored_components")
                     narratives.append(
                         lambda: render_effort_narrative(
-                            selected_team, ef_info, ef_avg
+                            selected_team, ef_info, ef_avg, ef_scored
                         )
                     )
 

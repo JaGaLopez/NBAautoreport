@@ -18,7 +18,7 @@ from analytics.GetTeamStats import GetTeamStats
 from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
-from analytics.GetEffortWhileLosing import GetEffortWhileLosing
+from analytics.GetEffortWhileLosing import GetEffortWhileLosing, SCHEMA as EFFORT_SCHEMA
 from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTING_SCHEMA
 from analytics.GetThreePointVariance import GetThreePointVariance, SCHEMA as THREEPOINT_SCHEMA
 from analytics.LineScores import iter_line_scores
@@ -62,6 +62,7 @@ def _season_complete(season):
 # alone once written, so without this a stat that gains a field would never
 # regenerate for any completed season.
 DATASET_SCHEMA = {
+    "effort": EFFORT_SCHEMA,
     "shooting": SHOOTING_SCHEMA,
     "threepoint": THREEPOINT_SCHEMA,
     "hotstarts": HOTSTARTS_SCHEMA,

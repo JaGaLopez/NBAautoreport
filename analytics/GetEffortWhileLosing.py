@@ -23,6 +23,22 @@ _RATE_COLUMNS = ("OREB_PCT",)
 # NBA hustle tracking begins in 2015-16; earlier seasons return nothing useful.
 FIRST_HUSTLE_SEASON = "2015-16"
 
+# Bump whenever the stored shape or the scoring rule changes, so precompute
+# regenerates a finished season instead of trusting a stale file.
+SCHEMA = 1
+
+# A component only enters the score if the average team records at least this
+# many of them per season on each side.
+#
+# Charges drawn fail it badly: 390 league-wide in losses, about 13 per team, a
+# third of one per game. A ratio of ~13 events against ~13 carries roughly 28%
+# Poisson noise per side, which showed up as team values from 0.27 to 2.85
+# while every other component sat between 0.83 and 1.19. Averaged in with equal
+# weight, that one noisy column drove the whole stat: the composite correlated
+# +0.94 with charges alone, and +0.13 once they were dropped. Sparse components
+# are still reported for display, just not scored.
+MIN_EVENTS_PER_TEAM = 100
+
 
 def _retry(fetch, retries=4, pause=1.0):
     """Call `fetch`, retrying transient nba_api failures. Returns None if all fail."""
@@ -68,6 +84,25 @@ def _fetch_advanced(season, season_type, outcome):
         ).get_data_frames()
     )
     return _team_frame(frames) if frames else None
+
+
+def _is_scorable(column, hustle_l, hustle_w):
+    """True if a component is frequent enough for its ratio to mean anything.
+
+    Rate columns (a percentage, not a count of events) are always scorable:
+    they are computed off thousands of possessions rather than a handful of
+    plays. Count columns have to clear MIN_EVENTS_PER_TEAM on both sides.
+    """
+    if column in _RATE_COLUMNS:
+        return True
+
+    for frame in (hustle_l, hustle_w):
+        if frame is None or column not in frame.columns:
+            return False
+        per_team = pd.to_numeric(frame[column], errors="coerce").mean()
+        if pd.isna(per_team) or per_team < MIN_EVENTS_PER_TEAM:
+            return False
+    return True
 
 
 def _per_minute(df, columns):
@@ -127,7 +162,8 @@ def GetEffortWhileLosing(SEASON, SEASON_TYPE="Regular Season"):
     to have both a win and a loss. Callers should treat that as "skip this
     stat", not as an error.
     """
-    empty = {"league_average": 0, "components": [], "teams": {}}
+    empty = {"schema": SCHEMA, "league_average": 0, "components": [],
+             "scored_components": [], "teams": {}}
 
     if SEASON < FIRST_HUSTLE_SEASON:
         return empty
@@ -165,7 +201,13 @@ def GetEffortWhileLosing(SEASON, SEASON_TYPE="Regular Season"):
     ratios = losing / winning.where(winning != 0)
     ratios = ratios.replace([float("inf"), float("-inf")], pd.NA).astype(float)
 
-    retention = ratios.mean(axis=1, skipna=True)
+    # Decide the scored set league-wide rather than per team, so every team's
+    # number is the average of the same things and the scores stay comparable.
+    scored = [c for c in components if _is_scorable(c, hustle_l, hustle_w)]
+    if not scored:
+        return empty
+
+    retention = ratios[scored].mean(axis=1, skipna=True)
     retention = retention.dropna()
     if retention.empty:
         return empty
@@ -192,8 +234,12 @@ def GetEffortWhileLosing(SEASON, SEASON_TYPE="Regular Season"):
         }
 
     return {
+        "schema": SCHEMA,
         "league_average": round(float(retention.mean()), 3),
         "components": components,
+        # The subset that actually feeds effort_retention. The rest are shown
+        # for context but are too sparse to be worth scoring.
+        "scored_components": scored,
         "teams": teams,
     }
 
