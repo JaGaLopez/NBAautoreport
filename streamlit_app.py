@@ -78,7 +78,7 @@ CENTERED_CSS = {
 
 
 def show_table(df, *, double_click=False, cell_style=None, height=None,
-               pre_selected=None, fit_width=False):
+               pre_selected=None):
     gb = GridOptionsBuilder.from_dataframe(df)
     # suppressColumnVirtualisation so every column (even off-screen ones on wide
     # tables) gets measured and autosized to its content.
@@ -118,12 +118,9 @@ def show_table(df, *, double_click=False, cell_style=None, height=None,
     for col in go.get("columnDefs", []):
         col.update(no_filter)
 
-    # fitGridWidth spreads a handful of columns across the full width, which is
-    # what the narrow narrative tables want; fitCellContents sizes each column to
-    # its content and lets the wide stats tables scroll sideways.
-    go["autoSizeStrategy"] = {
-        "type": "fitGridWidth" if fit_width else "fitCellContents"
-    }
+    # fitCellContents = size every column to its content (header + longest
+    # cell), letting the wide stats tables scroll sideways.
+    go["autoSizeStrategy"] = {"type": "fitCellContents"}
 
     kwargs = dict(
         gridOptions=go,
@@ -135,6 +132,16 @@ def show_table(df, *, double_click=False, cell_style=None, height=None,
         kwargs["height"] = height
 
     return AgGrid(df, **kwargs)
+
+
+def simple_table(df, height=None):
+    """A small read-only table for the narrative cards.
+
+    Deliberately native rather than AG Grid: a grid first drawn inside a
+    collapsed expander lays out at zero width and stays blank when opened, and
+    no resize hook recovers it. st.dataframe re-renders on expand.
+    """
+    st.dataframe(df, hide_index=True, use_container_width=True, height=height)
 
 
 def round_for_display(df):
@@ -323,41 +330,46 @@ def render_comeback_narrative(team_name, team_count, league_avg, games):
         f"{team_count} vs. {round(league_avg, 1)} (League Average)",
     )
     bubbles([(f"{gap:+.1f}", gap >= 0)])
+    # Rendered only when asked for. Both AG Grid and st.dataframe
+    # lay out at zero size if they are first drawn inside a collapsed
+    # container and never recover, so the body must not exist until
+    # it is actually shown.
+    if st.toggle("Details", key=f"details-comebacks-{team_name}"):
 
-    history = team_comeback_counts(team_name)
-    if len(history) > 1:
-        lo, hi = min(history.values()), max(history.values())
-        if team_count == lo < hi:
+        history = team_comeback_counts(team_name)
+        if len(history) > 1:
+            lo, hi = min(history.values()), max(history.values())
+            if team_count == lo < hi:
+                insight(
+                    f"Historic low: fewest comebacks for {team_name} "
+                    f"in our {len(history)} seasons of data."
+                )
+
+        if games:
+            # Biggest comeback this season: the largest Q3 deficit this team erased.
+            biggest = max(games, key=lambda g: g["DEFICIT_AFTER_Q3"])
+            big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
             insight(
-                f"Historic low: fewest comebacks for {team_name} "
-                f"in our {len(history)} seasons of data."
+                f"Biggest comeback this season: "
+                f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp}."
             )
 
-    if games:
-        # Biggest comeback this season: the largest Q3 deficit this team erased.
-        biggest = max(games, key=lambda g: g["DEFICIT_AFTER_Q3"])
-        big_opp = biggest["MATCHUP"].split("vs.")[-1].strip()
-        insight(
-            f"Biggest comeback this season: "
-            f"{biggest['DEFICIT_AFTER_Q3']}-pt deficit vs. {big_opp}."
+            games_df = pd.DataFrame(games)
+            games_df["Date"] = pd.to_datetime(games_df["GAME_DATE"]).dt.strftime("%m/%d")
+            # Strip the selected team's own abbreviation, leaving just the opponent.
+            games_df["Opponent"] = games_df["MATCHUP"].str.split("vs.").str[-1].str.strip()
+            games_df = games_df[
+                ["Date", "Opponent", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
+            ].rename(columns={
+                "DEFICIT_AFTER_Q3": "Q3 Deficit",
+                "FINAL_TEAM": "Final",
+                "FINAL_OPP": "Final (Opp)",
+            })
+            simple_table(games_df, height=175)
+
+        tech_note(
+            "A comeback is trailing after three quarters and still winning the game."
         )
-
-        games_df = pd.DataFrame(games)
-        games_df["Date"] = pd.to_datetime(games_df["GAME_DATE"]).dt.strftime("%m/%d")
-        # Strip the selected team's own abbreviation, leaving just the opponent.
-        games_df["Opponent"] = games_df["MATCHUP"].str.split("vs.").str[-1].str.strip()
-        games_df = games_df[
-            ["Date", "Opponent", "DEFICIT_AFTER_Q3", "FINAL_TEAM", "FINAL_OPP"]
-        ].rename(columns={
-            "DEFICIT_AFTER_Q3": "Q3 Deficit",
-            "FINAL_TEAM": "Final",
-            "FINAL_OPP": "Final (Opp)",
-        })
-        show_table(games_df, height=175, fit_width=True)
-
-    tech_note(
-        "A comeback is trailing after three quarters and still winning the game."
-    )
 
 
 @st.cache_data(ttl=86400)
@@ -386,44 +398,49 @@ def render_effort_narrative(team_name, info, league_avg, scored=None):
         f"{score:.0%} vs. {league_avg:.0%} (League Average)",
     )
     bubbles([(f"{gap:+.0f} pts", gap >= 0)])
+    # Rendered only when asked for. Both AG Grid and st.dataframe
+    # lay out at zero size if they are first drawn inside a collapsed
+    # container and never recover, so the body must not exist until
+    # it is actually shown.
+    if st.toggle("Details", key=f"details-effort-{team_name}"):
 
-    # Flag a season that is (or ties) this team's lowest across our data. Only
-    # meaningful with more than one season and scores that actually vary.
-    history = team_effort_history(team_name)
-    if len(history) > 1:
-        lo, hi = min(history.values()), max(history.values())
-        if score == lo < hi:
-            insight(
-                f"Historic low, least effort in losses for {team_name} "
-                f"in our {len(history)} seasons of data."
-            )
+        # Flag a season that is (or ties) this team's lowest across our data. Only
+        # meaningful with more than one season and scores that actually vary.
+        history = team_effort_history(team_name)
+        if len(history) > 1:
+            lo, hi = min(history.values()), max(history.values())
+            if score == lo < hi:
+                insight(
+                    f"Historic low, least effort in losses for {team_name} "
+                    f"in our {len(history)} seasons of data."
+                )
 
-    components = info.get("components") or {}
-    if components:
-        # Kept numeric (not a "%" string) so the grid still sorts these properly.
-        comp_df = pd.DataFrame(
-            [
-                {"Metric": EFFORT_COMPONENT_LABELS.get(k, k),
-                 "% of Winning Effort": round(v * 100)}
-                for k, v in components.items()
-            ]
-        ).sort_values("% of Winning Effort")
-        show_table(comp_df, height=175, fit_width=True)
+        components = info.get("components") or {}
+        if components:
+            # Kept numeric (not a "%" string) so the grid still sorts these properly.
+            comp_df = pd.DataFrame(
+                [
+                    {"Metric": EFFORT_COMPONENT_LABELS.get(k, k),
+                     "% of Winning Effort": round(v * 100)}
+                    for k, v in components.items()
+                ]
+            ).sort_values("% of Winning Effort")
+            simple_table(comp_df, height=175)
 
-    tech_note(
-        "100% means they compete equally hard whether winning or losing, "
-        "below 100% means the effort drops off once games go bad."
-    )
-    # Sparse components are shown but not scored, so say which ones.
-    if scored:
-        unscored = [EFFORT_COMPONENT_LABELS.get(c, c)
-                    for c in (info.get("components") or {}) if c not in scored]
-        if unscored:
-            tech_note(
-                f"{', '.join(unscored)} shown for context but left out of the "
-                "score: teams don't draw enough charges while losing for the "
-                "ratio to mean anything."
-            )
+        tech_note(
+            "100% means they compete equally hard whether winning or losing, "
+            "below 100% means the effort drops off once games go bad."
+        )
+        # Sparse components are shown but not scored, so say which ones.
+        if scored:
+            unscored = [EFFORT_COMPONENT_LABELS.get(c, c)
+                        for c in (info.get("components") or {}) if c not in scored]
+            if unscored:
+                tech_note(
+                    f"{', '.join(unscored)} shown for context but left out of the "
+                    "score: teams don't draw enough charges while losing for the "
+                    "ratio to mean anything."
+                )
 
 
 def render_hot_starts_narrative(team_name, info, league_avg):
@@ -437,41 +454,46 @@ def render_hot_starts_narrative(team_name, info, league_avg):
         f"{q1_pct:.0%} vs. {league_avg:.0%} (League Average)",
     )
     bubbles([(f"{gap:+.0f} pts", gap >= 0)])
+    # Rendered only when asked for. Both AG Grid and st.dataframe
+    # lay out at zero size if they are first drawn inside a collapsed
+    # container and never recover, so the body must not exist until
+    # it is actually shown.
+    if st.toggle("Details", key=f"details-hotstarts-{team_name}"):
 
-    # First quarter and halftime read as two separate observations: how often
-    # the start happens, then what becomes of it.
-    insight(
-        f"First quarter: {team_name} led by {MIN_LEAD}+ after one quarter in "
-        f"{q1_pct:.0%} of its games ({info['q1_leads']} of {info['games']})."
-    )
-
-    held_pct = info.get("held_pct")
-    if held_pct is not None:
-        kept = "kept" if held_pct >= 0.5 else "gave back"
+        # First quarter and halftime read as two separate observations: how often
+        # the start happens, then what becomes of it.
         insight(
-            f"Halftime: it {kept} the start, carrying a lead at least that big "
-            f"into halftime in {held_pct:.0%} of them "
-            f"({info['held']} of {info['q1_leads']})."
+            f"First quarter: {team_name} led by {MIN_LEAD}+ after one quarter in "
+            f"{q1_pct:.0%} of its games ({info['q1_leads']} of {info['games']})."
         )
 
-    starts_df = pd.DataFrame(
-        [
-            {"Split": f"Led by {MIN_LEAD}+ after Q1", "Games": info["q1_leads"],
-             "Rate": round(q1_pct * 100)},
-            {"Split": f"Led by {MIN_LEAD}+ at halftime", "Games": info["h1_leads"],
-             "Rate": round(info["h1_lead_pct"] * 100)},
-            {"Split": "Held the Q1 lead", "Games": info.get("held"),
-             "Rate": round(held_pct * 100) if held_pct is not None else None},
-        ]
-    )
-    show_table(starts_df, height=140, fit_width=True)
+        held_pct = info.get("held_pct")
+        if held_pct is not None:
+            kept = "kept" if held_pct >= 0.5 else "gave back"
+            insight(
+                f"Halftime: it {kept} the start, carrying a lead at least that big "
+                f"into halftime in {held_pct:.0%} of them "
+                f"({info['held']} of {info['q1_leads']})."
+            )
 
-    tech_note(
-        f"A start counts only at {MIN_LEAD} points or more, since a one-point "
-        "edge after twelve minutes is noise. Held means the halftime lead was "
-        "at least as big as the first-quarter one, so a start that gets "
-        "whittled away doesn't count."
-    )
+        starts_df = pd.DataFrame(
+            [
+                {"Split": f"Led by {MIN_LEAD}+ after Q1", "Games": info["q1_leads"],
+                 "Rate": round(q1_pct * 100)},
+                {"Split": f"Led by {MIN_LEAD}+ at halftime", "Games": info["h1_leads"],
+                 "Rate": round(info["h1_lead_pct"] * 100)},
+                {"Split": "Held the Q1 lead", "Games": info.get("held"),
+                 "Rate": round(held_pct * 100) if held_pct is not None else None},
+            ]
+        )
+        simple_table(starts_df, height=140)
+
+        tech_note(
+            f"A start counts only at {MIN_LEAD} points or more, since a one-point "
+            "edge after twelve minutes is noise. Held means the halftime lead was "
+            "at least as big as the first-quarter one, so a start that gets "
+            "whittled away doesn't count."
+        )
 
 
 def _ordinal(n):
@@ -559,53 +581,58 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
 
     if pills:
         bubbles(pills)
+    # Rendered only when asked for. Both AG Grid and st.dataframe
+    # lay out at zero size if they are first drawn inside a collapsed
+    # container and never recover, so the body must not exist until
+    # it is actually shown.
+    if st.toggle("Details", key=f"details-shooting-{team_name}"):
 
-    # What the season says to expect, before looking at the recent form below.
-    if base.get("efg_pct") is not None:
-        expected = (
-            f"Expected: {base['efg_pct']:.1%} eFG% on {base['fga']:.0f} attempts "
-            f"per game, {_ordinal(base['efg_percentile'])} percentile in the league."
-        )
-        if base.get("open_share") is not None:
-            expected += (
-                f" {base['open_share']:.0%} of those looks are open or wide open "
-                f"({_ordinal(base['open_share_percentile'])} percentile), and they shoot "
-                f"{base['open_efg_pct']:.1%} on them."
+        # What the season says to expect, before looking at the recent form below.
+        if base.get("efg_pct") is not None:
+            expected = (
+                f"Expected: {base['efg_pct']:.1%} eFG% on {base['fga']:.0f} attempts "
+                f"per game, {_ordinal(base['efg_percentile'])} percentile in the league."
             )
-        insight(expected)
+            if base.get("open_share") is not None:
+                expected += (
+                    f" {base['open_share']:.0%} of those looks are open or wide open "
+                    f"({_ordinal(base['open_share_percentile'])} percentile), and they shoot "
+                    f"{base['open_efg_pct']:.1%} on them."
+                )
+            insight(expected)
 
-    if windows:
-        rows = []
-        for label, w in windows.items():
-            delta = w["efg_delta_pts"]
-            rows.append({
-                "Window": label,
-                "Games": w["games"],
-                "eFG%": round(w["efg_pct"] * 100, 1),
-                # Absent on data stored before this field existed. Dropped
-                # below rather than rendered as an empty column.
-                "FGM vs. Avg": w.get("fgm_delta"),
-                "Swings": w.get("swings"),
-                "Form": "Hot" if delta >= 0 else "Cold",
-            })
-        windows_df = pd.DataFrame(rows).dropna(axis=1, how="all")
-        show_table(windows_df, height=140, fit_width=True)
+        if windows:
+            rows = []
+            for label, w in windows.items():
+                delta = w["efg_delta_pts"]
+                rows.append({
+                    "Window": label,
+                    "Games": w["games"],
+                    "eFG%": round(w["efg_pct"] * 100, 1),
+                    # Absent on data stored before this field existed. Dropped
+                    # below rather than rendered as an empty column.
+                    "FGM vs. Avg": w.get("fgm_delta"),
+                    "Swings": w.get("swings"),
+                    "Form": "Hot" if delta >= 0 else "Cold",
+                })
+            windows_df = pd.DataFrame(rows).dropna(axis=1, how="all")
+            simple_table(windows_df, height=140)
 
-    streak_insight(team_name, streaks)
+        streak_insight(team_name, streaks)
 
-    if as_of:
-        insight(f"Through games of {as_of}.")
+        if as_of:
+            insight(f"Through games of {as_of}.")
 
-    tech_note(
-        "Season eFG% with the range of made shots (one std). Streaky or "
-        "stable is set by week-to-week swing in eFG%, in points, against the "
-        "league average."
-    )
-    if windows:
         tech_note(
-            "Swings are a personalized stat, how far a team is off their own "
-            "baseline. 1 is normal, 0 is cold, 2 is hot, past those is more extreme."
+            "Season eFG% with the range of made shots (one std). Streaky or "
+            "stable is set by week-to-week swing in eFG%, in points, against the "
+            "league average."
         )
+        if windows:
+            tech_note(
+                "Swings are a personalized stat, how far a team is off their own "
+                "baseline. 1 is normal, 0 is cold, 2 is hot, past those is more extreme."
+            )
 
 
 def render_three_point_shooting_narrative(team_name, info, league, prior_season, as_of):
@@ -638,56 +665,60 @@ def render_three_point_shooting_narrative(team_name, info, league, prior_season,
 
     if pills:
         bubbles(pills)
+    # Rendered only when asked for. Both AG Grid and st.dataframe
+    # lay out at zero size if they are first drawn inside a collapsed
+    # container and never recover, so the body must not exist until
+    # it is actually shown.
+    if st.toggle("Details", key=f"details-threes-{team_name}"):
 
-    rate = info.get("fg3a_rate")
-    if rate is not None:
-        line = (
-            f"Threes are {rate:.0%} of everything they shoot, "
-            f"{_ordinal(info['fg3a_percentile'])} percentile in volume and "
-            f"{_ordinal(info['fg3_pct_percentile'])} in accuracy."
-        )
-        insight(line)
+        rate = info.get("fg3a_rate")
+        if rate is not None:
+            line = (
+                f"Threes are {rate:.0%} of everything they shoot, "
+                f"{_ordinal(info['fg3a_percentile'])} percentile in volume and "
+                f"{_ordinal(info['fg3_pct_percentile'])} in accuracy."
+            )
+            insight(line)
 
-    prior = info.get("prior")
-    if prior and change and prior_season:
-        vol = change["fg3a"]
-        acc = change["fg3_pct_pts"]
-        insight(
-            f"Against {prior_season}: {abs(vol):.1f} {'more' if vol >= 0 else 'fewer'} "
-            f"attempts a game (from {prior['fg3a']:.1f}), and "
-            f"{abs(acc):.1f} points {'better' if acc >= 0 else 'worse'} at "
-            f"{pct:.1%} against {prior['fg3_pct']:.1%}."
-        )
+        prior = info.get("prior")
+        if prior and change and prior_season:
+            vol = change["fg3a"]
+            acc = change["fg3_pct_pts"]
+            insight(
+                f"Against {prior_season}: {abs(vol):.1f} {'more' if vol >= 0 else 'fewer'} "
+                f"attempts a game (from {prior['fg3a']:.1f}), and "
+                f"{abs(acc):.1f} points {'better' if acc >= 0 else 'worse'} at "
+                f"{pct:.1%} against {prior['fg3_pct']:.1%}."
+            )
 
-    shooters = info.get("shooters") or []
-    if shooters:
-        rows = [{
-            "Shooter": s["name"],
-            "3PA": s["fg3a"],
-            "3P%": round(s["fg3_pct"] * 100, 1),
-            "Made": s["fg3m"],
-            "Swing": s.get("fg3m_stdev"),
-            "Blanks": round(s["blank_pct"] * 100),
-        } for s in shooters]
-        show_table(pd.DataFrame(rows).dropna(axis=1, how="all"),
-                   height=175, fit_width=True)
+        shooters = info.get("shooters") or []
+        if shooters:
+            rows = [{
+                "Shooter": s["name"],
+                "3PA": s["fg3a"],
+                "3P%": round(s["fg3_pct"] * 100, 1),
+                "Made": s["fg3m"],
+                "Swing": s.get("fg3m_stdev"),
+                "Blanks": round(s["blank_pct"] * 100),
+            } for s in shooters]
+            simple_table(pd.DataFrame(rows).dropna(axis=1, how="all"), height=175)
 
-    if as_of:
-        insight(f"Through games of {as_of}.")
+        if as_of:
+            insight(f"Through games of {as_of}.")
 
-    tech_note(
-        "Team volume and accuracy from three, against the league and against "
-        "this team last season. Volume moves fast league-wide, so the "
-        "year-over-year comparison says more about intent than the league rank."
-    )
-    if shooters:
         tech_note(
-            f"Shooters are the most accurate on the roster with at least "
-            f"{MIN_PLAYER_ATTEMPTS} attempts on the season. Swing is how much "
-            "their makes move night to night, and Blanks is the share of games "
-            "they made none at all: two players at the same percentage can be "
-            "very different to rely on."
+            "Team volume and accuracy from three, against the league and against "
+            "this team last season. Volume moves fast league-wide, so the "
+            "year-over-year comparison says more about intent than the league rank."
         )
+        if shooters:
+            tech_note(
+                f"Shooters are the most accurate on the roster with at least "
+                f"{MIN_PLAYER_ATTEMPTS} attempts on the season. Swing is how much "
+                "their makes move night to night, and Blanks is the share of games "
+                "they made none at all: two players at the same percentage can be "
+                "very different to rely on."
+            )
 
 
 # Page setup 
