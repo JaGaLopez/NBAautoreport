@@ -1,3 +1,5 @@
+import os
+
 import streamlit as st
 import requests
 import pandas as pd
@@ -5,7 +7,9 @@ import altair as alt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from st_aggrid.shared import JsCode
 
-API_URL = "https://nbastats.jglws.com"
+# Overridable so the app can be pointed at a locally running API during
+# development; defaults to the deployed one.
+API_URL = os.environ.get("NBA_API_URL", "https://nbastats.jglws.com")
 
 # Newest first; also the set of seasons used for "historic low" comparisons.
 SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
@@ -195,6 +199,9 @@ def load_data(season):
     tp_resp = requests.get(f"{API_URL}/teams/{season}/three-point-shooting")
     threes = tp_resp.json() if tp_resp.ok else None
 
+    pf_resp = requests.get(f"{API_URL}/teams/{season}/profiles")
+    profiles = pf_resp.json() if pf_resp.ok else None
+
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
@@ -211,6 +218,7 @@ def load_data(season):
         hot_starts,
         shooting,
         threes,
+        profiles,
     )
 
 
@@ -721,6 +729,205 @@ def render_three_point_shooting_narrative(team_name, info, league, prior_season,
             )
 
 
+
+# Standard three-letter codes, so the scatter can label points without crowding.
+TEAM_CODES = {
+    "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
+    "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
+    "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
+    "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
+    "LA Clippers": "LAC", "Los Angeles Clippers": "LAC", "Los Angeles Lakers": "LAL",
+    "Memphis Grizzlies": "MEM", "Miami Heat": "MIA", "Milwaukee Bucks": "MIL",
+    "Minnesota Timberwolves": "MIN", "New Orleans Pelicans": "NOP",
+    "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC", "Orlando Magic": "ORL",
+    "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX", "Portland Trail Blazers": "POR",
+    "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS", "Toronto Raptors": "TOR",
+    "Utah Jazz": "UTA", "Washington Wizards": "WAS",
+}
+
+
+def render_efficiency_landscape(adv_df, selected_team):
+    """Offense against defense, as a four-quadrant scatter of the whole league.
+
+    Defensive rating is inverted so that up and to the right is good on both
+    axes: the top-right quadrant is teams that score well and stop teams, the
+    bottom-left is neither. The dashed crosshair sits at the league average, so
+    a team's quadrant is read against the league rather than against zero.
+    """
+    needed = {"Team", "ORTG", "DRTG"}
+    if not needed.issubset(adv_df.columns):
+        return
+
+    df = adv_df[["Team", "ORTG", "DRTG"]].dropna().copy()
+    if df.empty:
+        return
+
+    df["NRTG"] = (df["ORTG"] - df["DRTG"]).round(1)
+    df["Code"] = df["Team"].map(TEAM_CODES).fillna(df["Team"].str[:3].str.upper())
+    df["Selected"] = df["Team"] == selected_team
+
+    mean_o = float(df["ORTG"].mean())
+    mean_d = float(df["DRTG"].mean())
+
+    # Pad each axis so no team is pinned to an edge, and so the crosshair is
+    # never flush against the plot border.
+    pad_o = max(1.5, (df["ORTG"].max() - df["ORTG"].min()) * 0.10)
+    pad_d = max(1.5, (df["DRTG"].max() - df["DRTG"].min()) * 0.10)
+    x = alt.X(
+        "ORTG:Q", title="Offensive Efficiency",
+        # zero=False: ratings live near 110, so including the origin would
+        # squash all thirty teams into one corner.
+        scale=alt.Scale(domain=[df["ORTG"].min() - pad_o, df["ORTG"].max() + pad_o],
+                        nice=False, zero=False),
+    )
+    # reverse=True puts the best defense at the top, matching the good/good corner.
+    y = alt.Y(
+        "DRTG:Q", title="Defensive Efficiency",
+        scale=alt.Scale(domain=[df["DRTG"].min() - pad_d, df["DRTG"].max() + pad_d],
+                        nice=False, zero=False, reverse=True),
+    )
+
+    tooltip = [
+        alt.Tooltip("Team:N"), alt.Tooltip("ORTG:Q", format=".1f"),
+        alt.Tooltip("DRTG:Q", format=".1f"), alt.Tooltip("NRTG:Q", format="+.1f"),
+    ]
+
+    points = alt.Chart(df).mark_circle(size=170, opacity=0.85).encode(
+        x=x, y=y, tooltip=tooltip,
+        color=alt.condition(
+            alt.datum.Selected,
+            alt.value("#ff4b4b"),
+            alt.Color("NRTG:Q", title="Net",
+                      scale=alt.Scale(scheme="blueorange", domainMid=0)),
+        ),
+    )
+    labels = alt.Chart(df).mark_text(
+        align="left", dx=9, dy=3, fontSize=10, color="#cccccc",
+    ).encode(x=x, y=y, text="Code:N")
+
+    crosshair_v = alt.Chart(pd.DataFrame({"v": [mean_o]})).mark_rule(
+        strokeDash=[4, 4], color="#888888").encode(x="v:Q")
+    crosshair_h = alt.Chart(pd.DataFrame({"v": [mean_d]})).mark_rule(
+        strokeDash=[4, 4], color="#888888").encode(y="v:Q")
+
+    chart = (
+        (crosshair_v + crosshair_h + points + labels)
+        .properties(width="container", height=460, padding={"bottom": 20})
+        .configure_view(strokeWidth=0)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+
+def _stat_value(value):
+    """Format a rank table value: fractions read as percentages."""
+    if value is None:
+        return None
+    return f"{value:.1%}" if abs(value) <= 1 else f"{value:.1f}"
+
+
+def _rank_rows(ranks):
+    return [{"Stat": r["stat"], "Value": _stat_value(r["value"]), "Rank": r["rank"]}
+            for r in ranks]
+
+
+def _play_rows(plays):
+    return [{
+        "Play Type": p["type"],
+        "Freq": f"{p['freq']:.0%}",
+        "PPP": round(p["ppp"], 2) if p.get("ppp") is not None else None,
+        "Pctile": p.get("percentile"),
+    } for p in plays]
+
+
+def _headline_rank(ranks, stat):
+    """The (value, rank) pair for one named stat, or (None, None)."""
+    for r in ranks:
+        if r["stat"] == stat:
+            return r["value"], r["rank"]
+    return None, None
+
+
+def render_offensive_overview_narrative(team_name, info):
+    """Render the offensive overview: where the team ranks, and what it runs."""
+    ranks = info.get("ranks") or []
+    plays = info.get("play_types") or []
+
+    value, rank = _headline_rank(ranks, "Offensive Rating")
+    headline = (f"{value:.1f} Offensive Rating ({_ordinal(rank)})"
+                if value is not None else "Not available")
+    st.metric("Offensive Overview", headline)
+
+    if rank is not None:
+        top_half = rank <= 15
+        bubbles([(f"{_ordinal(rank)} in the league", top_half)])
+
+    if st.toggle("Details", key=f"details-offense-{team_name}"):
+        if plays:
+            top = plays[0]
+            insight(
+                f"Most of what they run is {top['type'].lower()} at "
+                f"{top['freq']:.0%} of possessions, scoring {top['ppp']:.2f} "
+                f"points per play ({_ordinal(top['percentile'])} percentile)."
+            )
+        if ranks:
+            simple_table(pd.DataFrame(_rank_rows(ranks)), height=250)
+        if plays:
+            simple_table(pd.DataFrame(_play_rows(plays)), height=250)
+
+        tech_note(
+            "League rank out of 30, where 1 is best. Turnovers are ranked so "
+            "that fewest is first; every other stat here ranks highest first."
+        )
+        if plays:
+            tech_note(
+                "Play types are the share of this team's possessions that end "
+                "in each action, with points per play and the league percentile "
+                "for how well it goes."
+            )
+
+
+def render_defensive_formations_narrative(team_name, info):
+    """Render the defensive overview: what opponents manage, and what they run."""
+    ranks = info.get("ranks") or []
+    plays = info.get("play_types") or []
+
+    value, rank = _headline_rank(ranks, "Defensive Rating")
+    headline = (f"{value:.1f} Defensive Rating ({_ordinal(rank)})"
+                if value is not None else "Not available")
+    st.metric("Defensive Formations", headline)
+
+    if rank is not None:
+        top_half = rank <= 15
+        bubbles([(f"{_ordinal(rank)} in the league", top_half)])
+
+    if st.toggle("Details", key=f"details-defense-{team_name}"):
+        if plays:
+            top = plays[0]
+            insight(
+                f"Opponents attack them mostly with {top['type'].lower()} at "
+                f"{top['freq']:.0%} of possessions, scoring {top['ppp']:.2f} "
+                f"points per play against them."
+            )
+        if ranks:
+            simple_table(pd.DataFrame(_rank_rows(ranks)), height=250)
+        if plays:
+            simple_table(pd.DataFrame(_play_rows(plays)), height=250)
+
+        tech_note(
+            "League rank out of 30, where 1 is best: fewest opponent points, "
+            "lowest opponent percentages, most steals, blocks and forced "
+            "turnovers."
+        )
+        if plays:
+            tech_note(
+                "Play types here are what opponents run against this team, and "
+                "how well it goes for them. The API exposes no zone or man "
+                "coverage split, so scheme has to be read from which actions "
+                "opponents lean on and where the defense holds up."
+            )
+
+
 # Page setup 
 st.set_page_config(layout="wide")
 
@@ -735,6 +942,15 @@ st.markdown("""
        label up and the value down. The value line now carries the "vs. League
        Avg" comparison text, which is too long for the default 2.25rem. */
     [data-testid="stMetricLabel"] p { font-size: 1.25rem; font-weight: 600; }
+    /* Details toggle: white track with a dark knob when on, instead of the
+       default red. first-of-type picks the switch itself; the label text sits
+       in a sibling div that must keep its own background. */
+    [data-testid="stCheckbox"] label[data-selected="true"] > div:first-of-type {
+        background-color: #fafafa !important;
+    }
+    [data-testid="stCheckbox"] label[data-selected="true"] > div:first-of-type > div {
+        background-color: #0e1117 !important;
+    }
     [data-testid="stMetricValue"]   { font-size: 1.6rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -762,7 +978,7 @@ if data is None:
     st.warning(f"Stats for {season} haven't been precomputed yet. Try another season.")
     st.stop()
 
-basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting, threes = data
+basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting, threes, profiles = data
 
 # Layout
 # One column pair, with each side stacking its own content. Two separate
@@ -896,6 +1112,24 @@ with right:
                         )
                     )
 
+            if isinstance(profiles, dict):
+                pf_info = (profiles.get("teams", {}) or {}).get(selected_team) or {}
+                off_info = pf_info.get("offense")
+                def_info = pf_info.get("defense")
+
+                if off_info and off_info.get("ranks"):
+                    narratives.append(
+                        lambda: render_offensive_overview_narrative(
+                            selected_team, off_info
+                        )
+                    )
+                if def_info and def_info.get("ranks"):
+                    narratives.append(
+                        lambda: render_defensive_formations_narrative(
+                            selected_team, def_info
+                        )
+                    )
+
             if not narratives:
                 st.info("Narrative data isn't available for this season yet.")
             for render in narratives:
@@ -975,3 +1209,13 @@ if selected_team and selected_team in weekly.get("teams", {}):
     st.altair_chart(chart, use_container_width=True)
 else:
     st.caption("Double-click a team above to see its net rating trend over the season.")
+
+
+# Efficiency landscape (full width, below the net rating trend)
+st.divider()
+st.subheader("The Efficiency Landscape")
+st.caption(
+    "Every team's offense against its defense. Up and to the right is good on "
+    "both counts; the dashed lines are the league average."
+)
+render_efficiency_landscape(adv_df, selected_team)

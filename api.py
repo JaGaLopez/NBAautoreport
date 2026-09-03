@@ -59,6 +59,11 @@ def teams_three_point_shooting(season: str):
     return _cached(f"{season}_threepoint.json")
 
 
+@app.get("/teams/{season}/profiles")
+def teams_profiles(season: str):
+    return _cached(f"{season}_profiles.json")
+
+
 @app.get("/teams/{season}")
 def teams(season: str):
     return _cached(f"{season}_basic.json")
