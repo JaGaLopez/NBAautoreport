@@ -43,6 +43,9 @@ EFFORT_COMPONENT_LABELS = {
 # Mirrors MIN_LEAD in analytics/GetHotStarts.py, which defines the stat.
 MIN_LEAD = 5
 
+# Mirrors MIN_PLAYER_ATTEMPTS in analytics/GetThreePointShooting.py.
+MIN_PLAYER_ATTEMPTS = 100
+
 # Shortest first, so "recent form" reads from the tightest window that has games.
 SHOOTING_WINDOWS = ("1 Week", "2 Weeks", "3 Weeks")
 
@@ -182,7 +185,7 @@ def load_data(season):
     sv_resp = requests.get(f"{API_URL}/teams/{season}/shooting-variance")
     shooting = sv_resp.json() if sv_resp.ok else None
 
-    tp_resp = requests.get(f"{API_URL}/teams/{season}/three-point-variance")
+    tp_resp = requests.get(f"{API_URL}/teams/{season}/three-point-shooting")
     threes = tp_resp.json() if tp_resp.ok else None
 
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
@@ -605,88 +608,86 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
         )
 
 
-def render_three_point_variance_narrative(team_name, info, league_avg, as_of):
-    """Render the three-point variance narrative: the same shape as shooting
-    variance, restricted to the arc, where most of the night-to-night swing
-    actually comes from."""
-    stdev = info.get("fg3_stdev")
-    base = info.get("baseline") or {}
+def render_three_point_shooting_narrative(team_name, info, league, prior_season, as_of):
+    """Render the three-point overview: how much a team shoots from deep, how
+    well, how that compares to last season, and who is actually taking them."""
+    fg3a = info.get("fg3a")
+    pct = info.get("fg3_pct")
 
-    band = _fgm_band(base.get("fg3m"), base.get("fg3m_stdev"))
-    pct = base.get("fg3_pct")
-
-    if pct is not None and band:
-        headline = f"{pct:.1%} 3P% ({band} 3PM)"
+    if fg3a is not None and pct is not None:
+        headline = f"{fg3a:.1f} 3PA per game at {pct:.1%}"
     elif pct is not None:
-        headline = f"{pct:.1%} 3P%"
+        headline = f"{pct:.1%} from three"
     else:
         headline = "Not available"
 
-    st.metric("Three Point Variance", headline)
+    st.metric("3PT Shooting", headline)
 
+    # Volume and accuracy against the league, then the direction of travel
+    # against this team's own last season.
     pills = []
-    if stdev is not None:
-        streaky = stdev > league_avg
-        pills.append(("Streaky" if streaky else "Stable", not streaky))
+    league_fg3a = (league or {}).get("fg3a")
+    if fg3a is not None and league_fg3a:
+        heavy = fg3a >= league_fg3a
+        pills.append(("High Volume" if heavy else "Low Volume", heavy))
 
-    windows = info.get("windows") or {}
-    streaks = info.get("streaks") or {}
-    recent = next((windows[label] for label in SHOOTING_WINDOWS if label in windows), None)
-    if recent is not None and recent.get("fg3_delta_pts") is not None:
-        hot = recent["fg3_delta_pts"] >= 0
-        pills.append((f"Recently: {'Hot' if hot else 'Cold'}", hot))
-    elif streaks.get("current_direction"):
-        hot = streaks["current_direction"] == "hot"
-        pills.append((f"Recently: {'Hot' if hot else 'Cold'}", hot))
+    change = info.get("change") or {}
+    if change.get("fg3a") is not None:
+        more = change["fg3a"] >= 0
+        pills.append((f"{'More' if more else 'Fewer'} than last year", more))
 
     if pills:
         bubbles(pills)
 
-    if pct is not None:
-        expected = (
-            f"Expected: {pct:.1%} from three on {base['fg3a']:.0f} attempts per "
-            f"game, {_ordinal(base['fg3_percentile'])} percentile in the league."
+    rate = info.get("fg3a_rate")
+    if rate is not None:
+        line = (
+            f"Threes are {rate:.0%} of everything they shoot, "
+            f"{_ordinal(info['fg3a_percentile'])} percentile in volume and "
+            f"{_ordinal(info['fg3_pct_percentile'])} in accuracy."
         )
-        if base.get("open_share") is not None:
-            expected += (
-                f" {base['open_share']:.0%} of those threes are open or wide open "
-                f"({_ordinal(base['open_share_percentile'])} percentile), and they "
-                f"shoot {base['open_fg3_pct']:.1%} on them."
-            )
-        insight(expected)
+        insight(line)
 
-    if windows:
-        rows = []
-        for label, w in windows.items():
-            delta = w["fg3_delta_pts"]
-            rows.append({
-                "Window": label,
-                "Games": w["games"],
-                "3P%": round(w["fg3_pct"] * 100, 1),
-                "3PM vs. Avg": w.get("fg3m_delta"),
-                "Swings": w.get("swings"),
-                "Form": "Hot" if delta >= 0 else "Cold",
-            })
+    prior = info.get("prior")
+    if prior and change and prior_season:
+        vol = change["fg3a"]
+        acc = change["fg3_pct_pts"]
+        insight(
+            f"Against {prior_season}: {abs(vol):.1f} {'more' if vol >= 0 else 'fewer'} "
+            f"attempts a game (from {prior['fg3a']:.1f}), and "
+            f"{abs(acc):.1f} points {'better' if acc >= 0 else 'worse'} at "
+            f"{pct:.1%} against {prior['fg3_pct']:.1%}."
+        )
+
+    shooters = info.get("shooters") or []
+    if shooters:
+        rows = [{
+            "Shooter": s["name"],
+            "3PA": s["fg3a"],
+            "3P%": round(s["fg3_pct"] * 100, 1),
+            "Made": s["fg3m"],
+            "Swing": s.get("fg3m_stdev"),
+            "Blanks": round(s["blank_pct"] * 100),
+        } for s in shooters]
         show_table(pd.DataFrame(rows).dropna(axis=1, how="all"),
-                   height=140, fit_width=True)
-
-    streak_insight(team_name, streaks)
+                   height=175, fit_width=True)
 
     if as_of:
         insight(f"Through games of {as_of}.")
 
     tech_note(
-        "Season 3P% with the range of threes made (one std). Streaky or stable "
-        "is set by game-to-game swing in 3P%, in points, against the league "
-        "average. Threes are where most of a team's shooting noise lives, so "
-        "this swings wider than overall shooting for everyone."
+        "Team volume and accuracy from three, against the league and against "
+        "this team last season. Volume moves fast league-wide, so the "
+        "year-over-year comparison says more about intent than the league rank."
     )
-    if windows:
+    if shooters:
         tech_note(
-            "Swings are a personalized stat, how far a team is off their own "
-            "baseline. 1 is normal, 0 is cold, 2 is hot, past those is more extreme."
+            f"Shooters are the most accurate on the roster with at least "
+            f"{MIN_PLAYER_ATTEMPTS} attempts on the season. Swing is how much "
+            "their makes move night to night, and Blanks is the share of games "
+            "they made none at all: two players at the same percentage can be "
+            "very different to rely on."
         )
-
 
 
 # Page setup 
@@ -851,15 +852,16 @@ with right:
                     )
 
             if isinstance(threes, dict):
-                tp_teams = threes.get("teams", {}) or {}
-                tp_avg   = threes.get("league_average", 0)
-                tp_as_of = threes.get("as_of")
-                tp_info  = tp_teams.get(selected_team)
+                tp_teams  = threes.get("teams", {}) or {}
+                tp_league = threes.get("league") or {}
+                tp_prior  = threes.get("prior_season")
+                tp_as_of  = threes.get("as_of")
+                tp_info   = tp_teams.get(selected_team)
 
                 if tp_info:
                     narratives.append(
-                        lambda: render_three_point_variance_narrative(
-                            selected_team, tp_info, tp_avg, tp_as_of
+                        lambda: render_three_point_shooting_narrative(
+                            selected_team, tp_info, tp_league, tp_prior, tp_as_of
                         )
                     )
 

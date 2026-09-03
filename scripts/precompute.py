@@ -20,7 +20,7 @@ from analytics.BuildAverageTeam import BuildAverageTeam
 from analytics.GetWeeklyNetRating import GetWeeklyNetRating
 from analytics.GetEffortWhileLosing import GetEffortWhileLosing, SCHEMA as EFFORT_SCHEMA
 from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTING_SCHEMA
-from analytics.GetThreePointVariance import GetThreePointVariance, SCHEMA as THREEPOINT_SCHEMA
+from analytics.GetThreePointShooting import GetThreePointShooting, SCHEMA as THREEPOINT_SCHEMA
 from analytics.LineScores import iter_line_scores
 from analytics import GetQ4Comebacks as comebacks
 from analytics.GetQ4Comebacks import SCHEMA as COMEBACKS_SCHEMA
@@ -118,8 +118,8 @@ CORE_DATASETS = (
     ("effort",        lambda s: GetEffortWhileLosing(s)),
     # One game-log call for the whole league plus two shot-tracking calls.
     ("shooting",      lambda s: GetShootingVariance(s)),
-    # Same three calls again, from behind the arc only.
-    ("threepoint",    lambda s: GetThreePointVariance(s)),
+    # Team logs for this season and last, plus one league-wide player log.
+    ("threepoint",    lambda s: GetThreePointShooting(s)),
 )
 
 # Datasets built from the season's line scores. They share a single crawl
