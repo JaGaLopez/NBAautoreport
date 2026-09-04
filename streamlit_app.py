@@ -484,18 +484,33 @@ def render_hot_starts_narrative(team_name, info, league_avg):
                 f"({info['held']} of {info['q1_leads']})."
             )
 
-        starts_df = pd.DataFrame(
-            [
-                {"Split": f"Led by {MIN_LEAD}+ after Q1", "Games": info["q1_leads"],
-                 "Rate": round(q1_pct * 100)},
-                {"Split": f"Led by {MIN_LEAD}+ at halftime", "Games": info["h1_leads"],
-                 "Rate": round(info["h1_lead_pct"] * 100)},
-                {"Split": "Held the Q1 lead", "Games": info.get("held"),
-                 "Rate": round(held_pct * 100) if held_pct is not None else None},
-            ]
-        )
-        simple_table(starts_df, height=140)
+        def _row(label, games, win_pct, lift, vs_league):
+            return {
+                "Split": label,
+                "Games": games,
+                "Win%": round(win_pct * 100) if win_pct is not None else None,
+                "vs Season": lift,
+                "vs League": vs_league,
+            }
 
+        starts_df = pd.DataFrame([
+            _row(f"Lead by {MIN_LEAD}+ after Q1", info["q1_leads"],
+                 info.get("q1_win_pct"), info.get("q1_win_lift"),
+                 info.get("q1_win_lift_vs_league")),
+            _row("Held or increased lead after first half", info.get("held"),
+                 info.get("held_win_pct"), info.get("held_win_lift"),
+                 info.get("held_win_lift_vs_league")),
+        ])
+        # Older stored data has no win columns; drop them rather than showing
+        # a table of blanks.
+        simple_table(starts_df.dropna(axis=1, how="all"), height=140)
+
+        tech_note(
+            "Win% is how often the team won those games. vs Season is how much "
+            "higher that is than its win rate overall, and vs League compares "
+            "that gain to the average team's: every team wins more when ahead, "
+            "so the gain is what separates them."
+        )
         tech_note(
             f"A start counts only at {MIN_LEAD} points or more, since a one-point "
             "edge after twelve minutes is noise. Held means the halftime lead was "
@@ -1080,41 +1095,26 @@ with right:
             # Fixed display order, so a team's cards are always in the same
             # place no matter which team is selected. A narrative is simply
             # left out when its data is missing.
+            # Cards render in the order these blocks appear: offense, defense,
+            # shooting variance, 3PT shooting, effort, hot starts, comebacks.
+            # A card is simply left out when its data is missing.
             narratives = []
 
-            if isinstance(comebacks, dict):
-                cb_teams = comebacks.get("teams", {}) or {}
-                cb_avg   = comebacks.get("league_average", 0)
-                cb_info  = cb_teams.get(selected_team) or {}
-                cb_count = cb_info.get("count", 0)
-                narratives.append(
-                    lambda: render_comeback_narrative(
-                        selected_team, cb_count, cb_avg, cb_info.get("games", [])
-                    )
-                )
+            if isinstance(profiles, dict):
+                pf_info = (profiles.get("teams", {}) or {}).get(selected_team) or {}
+                off_info = pf_info.get("offense")
+                def_info = pf_info.get("defense")
 
-            if isinstance(effort, dict):
-                ef_teams = effort.get("teams", {}) or {}
-                ef_avg   = effort.get("league_average", 0)
-                ef_info  = ef_teams.get(selected_team)
-
-                if ef_info and ef_info.get("effort_retention") is not None:
-                    ef_scored = effort.get("scored_components")
+                if off_info and off_info.get("ranks"):
                     narratives.append(
-                        lambda: render_effort_narrative(
-                            selected_team, ef_info, ef_avg, ef_scored
+                        lambda: render_offensive_overview_narrative(
+                            selected_team, off_info
                         )
                     )
-
-            if isinstance(hot_starts, dict):
-                hs_teams = hot_starts.get("teams", {}) or {}
-                hs_avg   = hot_starts.get("league_average", 0)
-                hs_info  = hs_teams.get(selected_team)
-
-                if hs_info and hs_info.get("q1_lead_pct") is not None:
+                if def_info and def_info.get("ranks"):
                     narratives.append(
-                        lambda: render_hot_starts_narrative(
-                            selected_team, hs_info, hs_avg
+                        lambda: render_defensive_formations_narrative(
+                            selected_team, def_info
                         )
                     )
 
@@ -1145,23 +1145,41 @@ with right:
                         )
                     )
 
-            if isinstance(profiles, dict):
-                pf_info = (profiles.get("teams", {}) or {}).get(selected_team) or {}
-                off_info = pf_info.get("offense")
-                def_info = pf_info.get("defense")
+            if isinstance(effort, dict):
+                ef_teams = effort.get("teams", {}) or {}
+                ef_avg   = effort.get("league_average", 0)
+                ef_info  = ef_teams.get(selected_team)
 
-                if off_info and off_info.get("ranks"):
+                if ef_info and ef_info.get("effort_retention") is not None:
+                    ef_scored = effort.get("scored_components")
                     narratives.append(
-                        lambda: render_offensive_overview_narrative(
-                            selected_team, off_info
+                        lambda: render_effort_narrative(
+                            selected_team, ef_info, ef_avg, ef_scored
                         )
                     )
-                if def_info and def_info.get("ranks"):
+
+            if isinstance(hot_starts, dict):
+                hs_teams = hot_starts.get("teams", {}) or {}
+                hs_avg   = hot_starts.get("league_average", 0)
+                hs_info  = hs_teams.get(selected_team)
+
+                if hs_info and hs_info.get("q1_lead_pct") is not None:
                     narratives.append(
-                        lambda: render_defensive_formations_narrative(
-                            selected_team, def_info
+                        lambda: render_hot_starts_narrative(
+                            selected_team, hs_info, hs_avg
                         )
                     )
+
+            if isinstance(comebacks, dict):
+                cb_teams = comebacks.get("teams", {}) or {}
+                cb_avg   = comebacks.get("league_average", 0)
+                cb_info  = cb_teams.get(selected_team) or {}
+                cb_count = cb_info.get("count", 0)
+                narratives.append(
+                    lambda: render_comeback_narrative(
+                        selected_team, cb_count, cb_avg, cb_info.get("games", [])
+                    )
+                )
 
             if not narratives:
                 st.info("Narrative data isn't available for this season yet.")
@@ -1249,6 +1267,6 @@ st.divider()
 st.subheader("The Efficiency Landscape")
 st.caption(
     "Every team's offense against its defense. Up and to the right is good on "
-    "both counts; the dashed lines are the league average."
+    "both counts; the dashed lines are the league average. Credit @Kirk Goldsberry"
 )
 render_efficiency_landscape(adv_df, selected_team)

@@ -20,7 +20,7 @@ MIN_LEAD = 5
 
 # Bump whenever the stored shape changes, so precompute regenerates a finished
 # season's file instead of leaving a stale one in place.
-SCHEMA = 2
+SCHEMA = 3
 
 # The line score crawl is shared with the other stats built on it, so one pass
 # over the season can feed all of them. See analytics/LineScores.py.
@@ -46,7 +46,8 @@ def _quarter(row, *keys):
 def new_tally():
     """Empty accumulator: every team present with zero games."""
     return {
-        t["id"]: {"games": 0, "q1": 0, "h1": 0, "held": 0}
+        t["id"]: {"games": 0, "wins": 0, "q1": 0, "h1": 0, "held": 0,
+                  "q1_wins": 0, "held_wins": 0}
         for t in nba_teams.get_teams()
     }
 
@@ -64,9 +65,15 @@ def add_game(tally, game_id, line_score):
     if None in (a_q1, b_q1, a_h1, b_h1):
         return
 
-    for team, q1, opp_q1, h1, opp_h1 in (
-        (a, a_q1, b_q1, a_h1, b_h1),
-        (b, b_q1, a_q1, b_h1, a_h1),
+    # The final score decides the win, so a start can be measured against
+    # whether it was actually converted.
+    a_pts, b_pts = a.get("PTS"), b.get("PTS")
+    if a_pts is None or b_pts is None or pd.isna(a_pts) or pd.isna(b_pts):
+        return
+
+    for team, q1, opp_q1, h1, opp_h1, pts, opp_pts in (
+        (a, a_q1, b_q1, a_h1, b_h1, a_pts, b_pts),
+        (b, b_q1, a_q1, b_h1, a_h1, b_pts, a_pts),
     ):
         row = tally.get(team["TEAM_ID"])
         if row is None:
@@ -77,14 +84,21 @@ def add_game(tally, game_id, line_score):
 
         # bool()/int() rather than the numpy scalars pandas hands back,
         # so the tallies stay JSON serializable for precompute.
+        won = bool(pts > opp_pts)
         row["games"] += 1
+        row["wins"] += int(won)
+
         led_q1 = bool(q1_margin >= MIN_LEAD)
         led_h1 = bool(h1_margin >= MIN_LEAD)
         row["q1"] += int(led_q1)
         row["h1"] += int(led_h1)
+        row["q1_wins"] += int(led_q1 and won)
+
         # Held means the halftime lead is at least as big as the one after the
         # first quarter, so a start that gets whittled away doesn't count.
-        row["held"] += int(led_q1 and bool(h1_margin >= q1_margin))
+        held = led_q1 and bool(h1_margin >= q1_margin)
+        row["held"] += int(held)
+        row["held_wins"] += int(held and won)
 
 
 def finish(tally):
@@ -102,23 +116,66 @@ def finish(tally):
         # Undefined for a team that never opened a qualifying lead at all.
         held_pct = row["held"] / row["q1"] if row["q1"] else None
 
+        # Win rate in each scenario, and how far above the team's own baseline
+        # that is. The lift is the point: every team wins more when it leads,
+        # so the raw rate says little on its own.
+        win_pct = row["wins"] / row["games"]
+        q1_win_pct = row["q1_wins"] / row["q1"] if row["q1"] else None
+        held_win_pct = row["held_wins"] / row["held"] if row["held"] else None
+
         teams[name] = {
             "games": row["games"],
+            "wins": row["wins"],
+            "win_pct": round(win_pct, 3),
             "q1_leads": row["q1"],
             "q1_lead_pct": round(q1_pct, 3),
+            "q1_wins": row["q1_wins"],
+            "q1_win_pct": round(q1_win_pct, 3) if q1_win_pct is not None else None,
+            "q1_win_lift": (
+                round((q1_win_pct - win_pct) * 100, 1)
+                if q1_win_pct is not None else None
+            ),
             "h1_leads": row["h1"],
             "h1_lead_pct": round(h1_pct, 3),
             "held": row["held"],
             "held_pct": round(held_pct, 3) if held_pct is not None else None,
+            "held_wins": row["held_wins"],
+            "held_win_pct": (
+                round(held_win_pct, 3) if held_win_pct is not None else None
+            ),
+            "held_win_lift": (
+                round((held_win_pct - win_pct) * 100, 1)
+                if held_win_pct is not None else None
+            ),
         }
 
     if not teams:
         return {"schema": SCHEMA, "league_average": 0, "teams": {}}
 
+    def _mean(key):
+        vals = [t[key] for t in teams.values() if t.get(key) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    # League average lift, so a team can be told apart from the league-wide
+    # effect of simply being ahead.
+    league_q1_lift = _mean("q1_win_lift")
+    league_held_lift = _mean("held_win_lift")
+
+    for t in teams.values():
+        for key, league in (("q1_win_lift", league_q1_lift),
+                            ("held_win_lift", league_held_lift)):
+            value = t.get(key)
+            t[key + "_vs_league"] = (
+                round(value - league, 1)
+                if value is not None and league is not None else None
+            )
+
     league_average = sum(t["q1_lead_pct"] for t in teams.values()) / len(teams)
     return {
         "schema": SCHEMA,
         "league_average": round(league_average, 3),
+        "league_q1_win_lift": league_q1_lift,
+        "league_held_win_lift": league_held_lift,
         "teams": teams,
     }
 
