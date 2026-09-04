@@ -505,7 +505,13 @@ def render_hot_starts_narrative(team_name, info, league_avg):
 
 
 def _ordinal(n):
-    """83 -> '83rd'. Percentiles read as ordinals, and "83th" is jarring."""
+    """83 -> '83rd'. Percentiles read as ordinals, and "83th" is jarring.
+
+    None in means None out: a caller with no number to show must leave the
+    phrase out rather than print "None percentile".
+    """
+    if n is None:
+        return None
     if 10 <= n % 100 <= 20:
         return f"{n}th"
     return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
@@ -819,10 +825,26 @@ def render_efficiency_landscape(adv_df, selected_team):
 
 
 
+def _percentile_of(entry, teams=30):
+    """Percentile for a rank entry.
+
+    Payloads written before the percentile field existed carry only `rank`, so
+    derive it rather than rendering the card blank: rank 1 of 30 is the 100th
+    percentile, rank 30 the 0th.
+    """
+    pct = entry.get("percentile")
+    if pct is not None:
+        return pct
+    rank = entry.get("rank")
+    if rank is None or teams < 2:
+        return None
+    return round((teams - rank) / (teams - 1) * 100)
+
+
 def _rank_rows(ranks):
     """Percentile only: the raw value is the same number already on the big
     tables, and standing is what the card is for."""
-    return [{"Stat": r["stat"], "Percentile": r.get("percentile")} for r in ranks]
+    return [{"Stat": r["stat"], "Percentile": _percentile_of(r)} for r in ranks]
 
 
 def _play_rows(plays, type_label, freq_label, ppp_label):
@@ -838,7 +860,7 @@ def _headline_rank(ranks, stat):
     """The (value, percentile) pair for one named stat, or (None, None)."""
     for r in ranks:
         if r["stat"] == stat:
-            return r["value"], r.get("percentile")
+            return r.get("value"), _percentile_of(r)
     return None, None
 
 
@@ -849,8 +871,12 @@ def render_offensive_overview_narrative(team_name, info):
     plays = info.get("play_types") or []
 
     value, pct = _headline_rank(ranks, "Offensive Rating")
-    headline = (f"{value:.1f} Offensive Rating ({_ordinal(pct)} percentile)"
-                if value is not None else "Not available")
+    if value is None:
+        headline = "Not available"
+    elif pct is None:
+        headline = f"{value:.1f} Offensive Rating"
+    else:
+        headline = f"{value:.1f} Offensive Rating ({_ordinal(pct)} percentile)"
     st.metric("Offensive Overview", headline)
 
     if pct is not None:
@@ -891,8 +917,12 @@ def render_defensive_formations_narrative(team_name, info):
     plays = info.get("play_types") or []
 
     value, pct = _headline_rank(ranks, "Defensive Rating")
-    headline = (f"{value:.1f} Defensive Rating ({_ordinal(pct)} percentile)"
-                if value is not None else "Not available")
+    if value is None:
+        headline = "Not available"
+    elif pct is None:
+        headline = f"{value:.1f} Defensive Rating"
+    else:
+        headline = f"{value:.1f} Defensive Rating ({_ordinal(pct)} percentile)"
     st.metric("Defensive Formations", headline)
 
     if pct is not None:
