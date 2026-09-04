@@ -22,7 +22,7 @@ from nba_api.stats.endpoints import leaguedashteamstats, synergyplaytypes
 
 # Bump whenever the stored shape changes, so precompute regenerates a finished
 # season's file instead of leaving a stale one in place.
-SCHEMA = 1
+SCHEMA = 2
 
 _TIMEOUT = 60
 
@@ -127,13 +127,17 @@ def _ranked(frames, spec):
         # rank 1 is always the best, whichever direction that is for this stat.
         ranks = values.rank(ascending=not higher_is_better, method="min")
 
+        # Rank 1 of 30 reads as the 100th percentile, rank 30 as the 0th.
+        n = int(ranks.notna().sum())
         for team, value, rank in zip(df["TEAM_NAME"], values, ranks):
             if pd.isna(value) or pd.isna(rank):
                 continue
+            percentile = round((n - int(rank)) / (n - 1) * 100) if n > 1 else None
             out.setdefault(team, []).append({
                 "stat": label,
                 "value": round(float(value), 3),
                 "rank": int(rank),
+                "percentile": percentile,
             })
     return out
 
@@ -180,7 +184,7 @@ def GetTeamProfiles(SEASON, SEASON_TYPE="Regular Season"):
                 "Boston Celtics": {
                     "offense": {
                         "ranks": [{"stat": "Offensive Rating", "value": 119.5,
-                                   "rank": 1}, ...],
+                                   "rank": 1, "percentile": 100}, ...],
                         "play_types": [{"type": "Spot Up", "freq": 0.24,
                                         "ppp": 1.09, "percentile": 82}, ...],
                     },

@@ -819,48 +819,42 @@ def render_efficiency_landscape(adv_df, selected_team):
 
 
 
-def _stat_value(value):
-    """Format a rank table value: fractions read as percentages."""
-    if value is None:
-        return None
-    return f"{value:.1%}" if abs(value) <= 1 else f"{value:.1f}"
-
-
 def _rank_rows(ranks):
-    return [{"Stat": r["stat"], "Value": _stat_value(r["value"]), "Rank": r["rank"]}
-            for r in ranks]
+    """Percentile only: the raw value is the same number already on the big
+    tables, and standing is what the card is for."""
+    return [{"Stat": r["stat"], "Percentile": r.get("percentile")} for r in ranks]
 
 
-def _play_rows(plays):
+def _play_rows(plays, type_label, freq_label, ppp_label):
     return [{
-        "Play Type": p["type"],
-        "Freq": f"{p['freq']:.0%}",
-        "PPP": round(p["ppp"], 2) if p.get("ppp") is not None else None,
+        type_label: p["type"],
+        freq_label: f"{p['freq']:.0%}",
+        ppp_label: round(p["ppp"], 2) if p.get("ppp") is not None else None,
         "Pctile": p.get("percentile"),
     } for p in plays]
 
 
 def _headline_rank(ranks, stat):
-    """The (value, rank) pair for one named stat, or (None, None)."""
+    """The (value, percentile) pair for one named stat, or (None, None)."""
     for r in ranks:
         if r["stat"] == stat:
-            return r["value"], r["rank"]
+            return r["value"], r.get("percentile")
     return None, None
 
 
 def render_offensive_overview_narrative(team_name, info):
-    """Render the offensive overview: where the team ranks, and what it runs."""
+    """Render the offensive overview: how the team's offense ranks, and what
+    it runs. Offense only; the defensive counterpart is its own card."""
     ranks = info.get("ranks") or []
     plays = info.get("play_types") or []
 
-    value, rank = _headline_rank(ranks, "Offensive Rating")
-    headline = (f"{value:.1f} Offensive Rating ({_ordinal(rank)})"
+    value, pct = _headline_rank(ranks, "Offensive Rating")
+    headline = (f"{value:.1f} Offensive Rating ({_ordinal(pct)} percentile)"
                 if value is not None else "Not available")
     st.metric("Offensive Overview", headline)
 
-    if rank is not None:
-        top_half = rank <= 15
-        bubbles([(f"{_ordinal(rank)} in the league", top_half)])
+    if pct is not None:
+        bubbles([(f"{_ordinal(pct)} percentile offense", pct >= 50)])
 
     if st.toggle("Details", key=f"details-offense-{team_name}"):
         if plays:
@@ -873,57 +867,66 @@ def render_offensive_overview_narrative(team_name, info):
         if ranks:
             simple_table(pd.DataFrame(_rank_rows(ranks)), height=250)
         if plays:
-            simple_table(pd.DataFrame(_play_rows(plays)), height=250)
+            simple_table(
+                pd.DataFrame(_play_rows(plays, "Play Type", "Run", "Points/Play")),
+                height=250
+            )
 
         tech_note(
-            "League rank out of 30, where 1 is best. Turnovers are ranked so "
-            "that fewest is first; every other stat here ranks highest first."
+            "Percentile against the other 29 teams, where 100 is best. "
+            "Turnovers count down, so fewest is the 100th percentile; every "
+            "other stat here counts up."
         )
         if plays:
             tech_note(
-                "Play types are the share of this team's possessions that end "
-                "in each action, with points per play and the league percentile "
-                "for how well it goes."
+                "Run is the share of this team's possessions ending in that "
+                "action, with what it produces and how that compares league wide."
             )
 
 
 def render_defensive_formations_narrative(team_name, info):
-    """Render the defensive overview: what opponents manage, and what they run."""
+    """Render the defensive overview: how the defense ranks, and what opponents
+    run against it. Defense only; offense is its own card."""
     ranks = info.get("ranks") or []
     plays = info.get("play_types") or []
 
-    value, rank = _headline_rank(ranks, "Defensive Rating")
-    headline = (f"{value:.1f} Defensive Rating ({_ordinal(rank)})"
+    value, pct = _headline_rank(ranks, "Defensive Rating")
+    headline = (f"{value:.1f} Defensive Rating ({_ordinal(pct)} percentile)"
                 if value is not None else "Not available")
     st.metric("Defensive Formations", headline)
 
-    if rank is not None:
-        top_half = rank <= 15
-        bubbles([(f"{_ordinal(rank)} in the league", top_half)])
+    if pct is not None:
+        bubbles([(f"{_ordinal(pct)} percentile defense", pct >= 50)])
 
     if st.toggle("Details", key=f"details-defense-{team_name}"):
         if plays:
             top = plays[0]
             insight(
-                f"Opponents attack them mostly with {top['type'].lower()} at "
+                f"Opponents come at them mostly with {top['type'].lower()} at "
                 f"{top['freq']:.0%} of possessions, scoring {top['ppp']:.2f} "
                 f"points per play against them."
             )
         if ranks:
             simple_table(pd.DataFrame(_rank_rows(ranks)), height=250)
         if plays:
-            simple_table(pd.DataFrame(_play_rows(plays)), height=250)
+            simple_table(
+                pd.DataFrame(
+                    _play_rows(plays, "Defending Against", "Faced",
+                               "Points Allowed")
+                ),
+                height=250,
+            )
 
         tech_note(
-            "League rank out of 30, where 1 is best: fewest opponent points, "
-            "lowest opponent percentages, most steals, blocks and forced "
-            "turnovers."
+            "Percentile against the other 29 teams, where 100 is best: fewest "
+            "opponent points, lowest opponent percentages, most steals, blocks "
+            "and forced turnovers."
         )
         if plays:
             tech_note(
-                "Play types here are what opponents run against this team, and "
-                "how well it goes for them. The API exposes no zone or man "
-                "coverage split, so scheme has to be read from which actions "
+                "Faced is the share of opponent possessions ending in that "
+                "action against this team. The API exposes no zone or man "
+                "coverage split, so scheme has to be inferred from what "
                 "opponents lean on and where the defense holds up."
             )
 
