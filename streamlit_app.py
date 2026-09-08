@@ -7,6 +7,9 @@ import altair as alt
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from st_aggrid.shared import JsCode
 
+import theme
+from theme import bubbles, insight, section_label, tech_note
+
 # Overridable so the app can be pointed at a locally running API during
 # development; defaults to the deployed one.
 API_URL = os.environ.get("NBA_API_URL", "https://nbastats.jglws.com")
@@ -62,38 +65,7 @@ SHOOTING_WINDOWS = ("1 Week", "2 Weeks", "3 Weeks")
 BASIC_LOWER_IS_BETTER = {"TOV", "PF"}
 ADV_LOWER_IS_BETTER   = {"DRTG", "TOV%"}
 
-PERCENTILE_STYLE = JsCode("""
-function(params) {
-    if (params.colDef.field === 'Metric') return null;
-    if (!params.data || params.data.Metric !== 'Percentile') return null;
-    var val = parseFloat(params.value);
-    if (isNaN(val)) return null;
-    if (val >= 80) return {backgroundColor: '#27ae60', color: 'white'};
-    if (val >= 60) return {backgroundColor: '#a8e6cf', color: 'black'};
-    if (val >= 40) return {backgroundColor: '#e8e8e8', color: 'black'};
-    if (val >= 20) return {backgroundColor: '#ffb3b3', color: 'black'};
-    return {backgroundColor: '#e74c3c', color: 'white'};
-}
-""")
-
 DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
-
-# Center both the header label and the cell text. AG Grid aligns headers with
-# flexbox and cells with text-align, so it takes both rules.
-CENTERED_CSS = {
-    ".ag-header-cell-label": {"justify-content": "center"},
-    ".ag-cell": {"text-align": "center"},
-    # AG Grid's own selection tint is suppressed. Each grid keeps its own
-    # selection, so the table clicked last would stay lit while the other showed
-    # a different team. The shared team is named in the panel labels instead
-    # ("Players: ...", "Narrative: ..."), which cannot go stale.
-    #
-    # It is deliberately not painted from Python either: any per-team grid
-    # option, pre_selected or context alike, changes the component's arguments,
-    # which remounts it and makes the next click report an empty selection.
-    # That is what made picks on the first table land one behind.
-    ".ag-row-selected::before": {"background-color": "transparent !important"},
-}
 
 
 def show_table(df, *, double_click=False, cell_style=None, height=None):
@@ -138,7 +110,7 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
     kwargs = dict(
         gridOptions=go,
         allow_unsafe_jscode=True,
-        custom_css=CENTERED_CSS,
+        custom_css=theme.GRID_CSS,
         update_mode=GridUpdateMode.SELECTION_CHANGED if double_click else GridUpdateMode.NO_UPDATE,
     )
     if height is not None:
@@ -154,7 +126,17 @@ def simple_table(df, height=None):
     collapsed expander lays out at zero width and stays blank when opened, and
     no resize hook recovers it. st.dataframe re-renders on expand.
     """
-    st.dataframe(df, hide_index=True, use_container_width=True, height=height)
+    # Everything is rendered as text so every cell shares the same left edge.
+    # The native grid right-aligns numeric columns and left-aligns text ones,
+    # and it exposes no alignment setting; these tables are display-only, so
+    # nothing depends on the numeric dtype. Blanks stay blank rather than
+    # printing "None".
+    display = df.copy()
+    for column in display.columns:
+        display[column] = display[column].map(
+            lambda value: "" if pd.isna(value) else str(value)
+        )
+    st.dataframe(display, hide_index=True, use_container_width=True, height=height)
 
 
 def round_for_display(df):
@@ -286,73 +268,6 @@ def team_comeback_counts(team_name):
         if info is not None:
             counts[s] = info.get("count", 0)
     return counts
-
-
-def tech_note(text):
-    """A technical blurb: what the metric means and how to read it.
-
-    Gray, so the definitions sit back from the observations about the team.
-    """
-    st.caption(text)
-
-
-def insight(text):
-    """An observation about this particular team, in body white.
-
-    These carry the actual news on the card, so they read at full weight while
-    the tech_note definitions stay gray behind them.
-    """
-    st.markdown(
-        f"<p style='font-size:0.9rem; margin:0.25rem 0 0.5rem 0;'>{text}</p>",
-        unsafe_allow_html=True,
-    )
-
-
-def section_label(text):
-    """The name of a panel: Per Game Stats, Narratives, and so on.
-
-    White and larger than st.caption, which greys them down to the same weight
-    as the explanatory notes inside the cards. These name what you are looking
-    at, so they sit above that.
-    """
-    st.markdown(
-        f"<p style='font-size:1.25rem; font-weight:600; "
-        f"margin:0 0 0.4rem 0;'>{text}</p>",
-        unsafe_allow_html=True,
-    )
-
-
-# Streamlit's own delta colors, reused so hand-rolled bubbles match the ones
-# st.metric renders on the other cards.
-_BUBBLE_GREEN = "rgb(9, 171, 59)"
-_BUBBLE_RED = "rgb(255, 43, 43)"
-_BUBBLE_GREEN_BG = "rgba(9, 171, 59, 0.2)"
-_BUBBLE_RED_BG = "rgba(255, 43, 43, 0.2)"
-
-
-def bubbles(items):
-    """Render delta-style pills: [(text, good_or_bad), ...].
-
-    st.metric only takes one delta, and it picks the arrow direction from the
-    sign of the string, so "Streaky" can't point down without literally showing
-    a minus. Rendering the pills directly gives both the second bubble and the
-    arrow that actually matches the meaning.
-    """
-    spans = []
-    for text, good in items:
-        color = _BUBBLE_GREEN if good else _BUBBLE_RED
-        background = _BUBBLE_GREEN_BG if good else _BUBBLE_RED_BG
-        arrow = "&#8593;" if good else "&#8595;"
-        spans.append(
-            f"<span style='color:{color}; background-color:{background}; "
-            f"font-size:0.875rem; padding:0.15rem 0.6rem; border-radius:0.5rem; "
-            f"margin-right:0.5rem; white-space:nowrap; display:inline-block;'>"
-            f"{arrow} {text}</span>"
-        )
-    st.markdown(
-        f"<div style='margin:-0.5rem 0 0.5rem 0;'>{''.join(spans)}</div>",
-        unsafe_allow_html=True,
-    )
 
 
 def render_comeback_narrative(team_name, team_count, league_avg, games):
@@ -849,27 +764,31 @@ def render_efficiency_landscape(adv_df, selected_team):
         alt.Tooltip("DRTG:Q", format=".1f"), alt.Tooltip("NRTG:Q", format="+.1f"),
     ]
 
-    points = alt.Chart(df).mark_circle(size=170, opacity=0.85).encode(
+    points = alt.Chart(df).mark_circle(
+        size=theme.CHART_POINT_SIZE, opacity=theme.CHART_POINT_OPACITY
+    ).encode(
         x=x, y=y, tooltip=tooltip,
         color=alt.condition(
             alt.datum.Selected,
-            alt.value("#ff4b4b"),
+            alt.value(theme.CHART_SELECTED),
             alt.Color("NRTG:Q", title="Net",
-                      scale=alt.Scale(scheme="blueorange", domainMid=0)),
+                      scale=alt.Scale(scheme=theme.CHART_SCHEME, domainMid=0)),
         ),
     )
     labels = alt.Chart(df).mark_text(
-        align="left", dx=9, dy=3, fontSize=10, color="#cccccc",
+        align="left", dx=9, dy=3,
+        fontSize=theme.FONT_CHART_LABEL, color=theme.CHART_LABEL,
     ).encode(x=x, y=y, text="Code:N")
 
     crosshair_v = alt.Chart(pd.DataFrame({"v": [mean_o]})).mark_rule(
-        strokeDash=[4, 4], color="#888888").encode(x="v:Q")
+        strokeDash=[4, 4], color=theme.CHART_GUIDE).encode(x="v:Q")
     crosshair_h = alt.Chart(pd.DataFrame({"v": [mean_d]})).mark_rule(
-        strokeDash=[4, 4], color="#888888").encode(y="v:Q")
+        strokeDash=[4, 4], color=theme.CHART_GUIDE).encode(y="v:Q")
 
     chart = (
         (crosshair_v + crosshair_h + points + labels)
-        .properties(width="container", height=460, padding={"bottom": 20})
+        .properties(width="container", height=theme.CHART_HEIGHT_SCATTER,
+                    padding=theme.CHART_PAD_SCATTER)
         .configure_view(strokeWidth=0)
     )
     st.altair_chart(chart, use_container_width=True)
@@ -903,7 +822,7 @@ def _play_rows(plays, type_label, freq_label, ppp_label):
         type_label: p["type"],
         freq_label: f"{p['freq']:.0%}",
         ppp_label: round(p["ppp"], 2) if p.get("ppp") is not None else None,
-        "Pctile": p.get("percentile"),
+        "Percentile": p.get("percentile"),
     } for p in plays]
 
 
@@ -958,7 +877,7 @@ def render_offensive_overview_narrative(team_name, info):
             )
 
 
-def render_defensive_formations_narrative(team_name, info):
+def render_defensive_overview_narrative(team_name, info):
     """Render the defensive overview: how the defense ranks, and what opponents
     run against it. Defense only; offense is its own card."""
     ranks = info.get("ranks") or []
@@ -968,7 +887,7 @@ def render_defensive_formations_narrative(team_name, info):
     # The percentile lives in the bubble below, so the headline carries only
     # the rating itself.
     headline = f"{value:.1f} Defensive Rating" if value is not None else "Not available"
-    st.metric("Defensive Formations", headline)
+    st.metric("Defensive Overview", headline)
 
     if pct is not None:
         bubbles([(f"{_ordinal(pct)} percentile defense", pct >= 50)])
@@ -1007,39 +926,12 @@ def render_defensive_formations_narrative(team_name, info):
 
 
 # Page setup 
-st.set_page_config(page_title="NBA Auto Report", layout="wide")
+# Absolute so the icon resolves whatever the working directory is.
+PAGE_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png")
 
-st.markdown("""
-<style>
-    .block-container { padding-top: 2rem; }
-    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > div:nth-child(2) {
-        border-left: 2px solid #cccccc;
-        padding-left: 2rem;
-    }
-    /* Narrative cards: the stat's name is the headline, so scale the metric
-       label up and the value down. The value line now carries the "vs. League
-       Avg" comparison text, which is too long for the default 2.25rem. */
-    [data-testid="stMetricLabel"] p { font-size: 1.25rem; font-weight: 600; }
-    /* Details toggle: white track with a dark knob when on, instead of the
-       default red. first-of-type picks the switch itself; the label text sits
-       in a sibling div that must keep its own background. */
-    [data-testid="stCheckbox"] label[data-selected="true"] > div:first-of-type {
-        background-color: #fafafa !important;
-    }
-    [data-testid="stCheckbox"] label[data-selected="true"] > div:first-of-type > div {
-        background-color: #0e1117 !important;
-    }
-    [data-testid="stMetricValue"]   { font-size: 1.6rem; }
-    /* Panel labels moved up to 1.25rem, so the headings and the selectors
-       above them scale by roughly the same factor to keep the hierarchy. */
-    .block-container h1 { font-size: 3rem; }
-    .block-container h3 { font-size: 1.9rem; }
-    [data-testid="stSelectbox"] label p { font-size: 1.15rem; font-weight: 600; }
-    /* The chosen value sits in the combobox input; the surrounding widget
-       renders through a template element that plain CSS cannot reach into. */
-    [data-testid="stSelectbox"] input { font-size: 1.1rem; }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="NBA Auto Report", page_icon=PAGE_ICON, layout="wide")
+
+theme.inject()
 
 st.markdown("<h1 style='text-align: center;'>NBA Team Stats</h1>", unsafe_allow_html=True)
 
@@ -1157,7 +1049,7 @@ with right:
                     )
                 if def_info and def_info.get("ranks"):
                     narratives.append(
-                        lambda: render_defensive_formations_narrative(
+                        lambda: render_defensive_overview_narrative(
                             selected_team, def_info
                         )
                     )
@@ -1244,11 +1136,11 @@ with right:
             st.caption("Double-click a team on either table to compare.")
         else:
             show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
-                       cell_style=PERCENTILE_STYLE, height=175)
+                       cell_style=theme.PERCENTILE_STYLE, height=175)
 
             section_label("Advanced Stats")
             show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
-                       cell_style=PERCENTILE_STYLE, height=175)
+                       cell_style=theme.PERCENTILE_STYLE, height=175)
 
 # Net rating trend (full width, below all tables)
 st.divider()
@@ -1285,7 +1177,7 @@ if selected_team and selected_team in weekly.get("teams", {}):
                 "Series:N", title=None,
                 scale=alt.Scale(
                     domain=[selected_team, "League Average"],
-                    range=["#1f77b4", "#e74c3c"],  # team blue, league red
+                    range=[theme.CHART_TEAM, theme.CHART_LEAGUE],
                 ),
             ),
         )
@@ -1300,13 +1192,14 @@ if selected_team and selected_team in weekly.get("teams", {}):
     trend = (
         alt.Chart(team_df)
         .transform_regression("Week", "Net Rating")
-        .mark_line(strokeDash=[6, 4], color="#5dade2", clip=True)  # light blue
+        .mark_line(strokeDash=[6, 4], color=theme.CHART_TREND, clip=True)
         .encode(x=x_axis, y=y_axis)
     )
 
     chart = (
         (lines + trend)
-        .properties(width="container", height=400, padding={"bottom": 30})
+        .properties(width="container", height=theme.CHART_HEIGHT_LINE,
+                    padding=theme.CHART_PAD_LINE)
         .configure_view(strokeWidth=0)
     )
     st.altair_chart(chart, use_container_width=True)
