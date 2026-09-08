@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analytics.GetTeamStats import GetTeamStats
 from analytics.GetAdvancedTeamStats import GetAdvancedTeamStats
 from analytics.BuildAverageTeam import BuildAverageTeam
-from analytics.GetWeeklyNetRating import GetWeeklyNetRating
+from analytics.GetWeeklyNetRating import GetWeeklyNetRating, SCHEMA as WEEKLY_SCHEMA
 from analytics.GetEffortWhileLosing import GetEffortWhileLosing, SCHEMA as EFFORT_SCHEMA
 from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTING_SCHEMA
 from analytics.GetThreePointShooting import GetThreePointShooting, SCHEMA as THREEPOINT_SCHEMA
@@ -71,6 +71,7 @@ DATASET_SCHEMA = {
     "players": PLAYERS_SCHEMA,
     "hotstarts": HOTSTARTS_SCHEMA,
     "comebacks": COMEBACKS_SCHEMA,
+    "weekly_netrtg": WEEKLY_SCHEMA,
 }
 
 

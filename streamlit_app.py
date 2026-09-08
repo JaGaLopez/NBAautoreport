@@ -718,7 +718,69 @@ TEAM_CODES = {
 }
 
 
-def render_efficiency_landscape(adv_df, selected_team):
+# The opening weeks are two-to-four game samples. Over 2024-25 they stretch the
+# rating spread to 32 points against the season's 15, which would leave the fixed
+# axes zoomed out for every later week. Dropping them costs two frames of
+# twenty-five and brings the spread back to 19.7; dropping a third only reaches
+# 19.0, so this is where the curve flattens.
+TIMELINE_SKIP_WEEKS = 2
+
+
+def _landscape_weeks(weekly):
+    """Per-week (label, frame) pairs for the landscape.
+
+    Returns None when the weekly payload predates the per-week ratings, which
+    keeps the chart working against a deployment whose data has not been
+    refreshed yet.
+    """
+    if not isinstance(weekly, dict):
+        return None
+    ortg, drtg, weeks = weekly.get("ortg"), weekly.get("drtg"), weekly.get("weeks")
+    if not (ortg and drtg and weeks):
+        return None
+
+    labels, frames = [], []
+    for i in range(TIMELINE_SKIP_WEEKS, len(weeks)):
+        rows = []
+        for team, o_series in ortg.items():
+            d_series = drtg.get(team) or []
+            if i >= len(o_series) or i >= len(d_series):
+                continue
+            o, d = o_series[i], d_series[i]
+            if o is None or d is None:
+                continue
+            rows.append({"Team": team, "ORTG": o, "DRTG": d})
+        if not rows:
+            continue
+        ts = pd.Timestamp(weeks[i])
+        labels.append(f"{ts:%b} {ts.day}")
+        frames.append(pd.DataFrame(rows))
+
+    return (labels, frames) if frames else None
+
+
+def _landscape_domains(frames):
+    """Padded axis domains and a net-rating colour domain covering every frame.
+
+    All three are shared across the whole timeline on purpose. A domain
+    recomputed per week would slide the scale under the points, so a team would
+    appear to move, or change colour, when only the scale had changed.
+    """
+    o_min = min(f["ORTG"].min() for f in frames)
+    o_max = max(f["ORTG"].max() for f in frames)
+    d_min = min(f["DRTG"].min() for f in frames)
+    d_max = max(f["DRTG"].max() for f in frames)
+    nets = [f["ORTG"] - f["DRTG"] for f in frames]
+    pad_o = max(1.5, (o_max - o_min) * 0.10)
+    pad_d = max(1.5, (d_max - d_min) * 0.10)
+    return (
+        [o_min - pad_o, o_max + pad_o],
+        [d_min - pad_d, d_max + pad_d],
+        [float(min(n.min() for n in nets)), float(max(n.max() for n in nets))],
+    )
+
+
+def _plot_landscape(df, selected_team, domain_o, domain_d, domain_net):
     """Offense against defense, as a four-quadrant scatter of the whole league.
 
     Defensive rating is inverted so that up and to the right is good on both
@@ -726,14 +788,7 @@ def render_efficiency_landscape(adv_df, selected_team):
     bottom-left is neither. The dashed crosshair sits at the league average, so
     a team's quadrant is read against the league rather than against zero.
     """
-    needed = {"Team", "ORTG", "DRTG"}
-    if not needed.issubset(adv_df.columns):
-        return
-
-    df = adv_df[["Team", "ORTG", "DRTG"]].dropna().copy()
-    if df.empty:
-        return
-
+    df = df.copy()
     df["NRTG"] = (df["ORTG"] - df["DRTG"]).round(1)
     df["Code"] = df["Team"].map(TEAM_CODES).fillna(df["Team"].str[:3].str.upper())
     df["Selected"] = df["Team"] == selected_team
@@ -741,22 +796,16 @@ def render_efficiency_landscape(adv_df, selected_team):
     mean_o = float(df["ORTG"].mean())
     mean_d = float(df["DRTG"].mean())
 
-    # Pad each axis so no team is pinned to an edge, and so the crosshair is
-    # never flush against the plot border.
-    pad_o = max(1.5, (df["ORTG"].max() - df["ORTG"].min()) * 0.10)
-    pad_d = max(1.5, (df["DRTG"].max() - df["DRTG"].min()) * 0.10)
     x = alt.X(
         "ORTG:Q", title="Offensive Efficiency",
         # zero=False: ratings live near 110, so including the origin would
         # squash all thirty teams into one corner.
-        scale=alt.Scale(domain=[df["ORTG"].min() - pad_o, df["ORTG"].max() + pad_o],
-                        nice=False, zero=False),
+        scale=alt.Scale(domain=domain_o, nice=False, zero=False),
     )
     # reverse=True puts the best defense at the top, matching the good/good corner.
     y = alt.Y(
         "DRTG:Q", title="Defensive Efficiency",
-        scale=alt.Scale(domain=[df["DRTG"].min() - pad_d, df["DRTG"].max() + pad_d],
-                        nice=False, zero=False, reverse=True),
+        scale=alt.Scale(domain=domain_d, nice=False, zero=False, reverse=True),
     )
 
     tooltip = [
@@ -772,7 +821,8 @@ def render_efficiency_landscape(adv_df, selected_team):
             alt.datum.Selected,
             alt.value(theme.CHART_SELECTED),
             alt.Color("NRTG:Q", title="Net",
-                      scale=alt.Scale(scheme=theme.CHART_SCHEME, domainMid=0)),
+                      scale=alt.Scale(scheme=theme.CHART_SCHEME, domainMid=0,
+                                      domain=domain_net)),
         ),
     )
     labels = alt.Chart(df).mark_text(
@@ -793,6 +843,28 @@ def render_efficiency_landscape(adv_df, selected_team):
     )
     st.altair_chart(chart, use_container_width=True)
 
+
+def render_efficiency_landscape(adv_df, selected_team, weekly=None):
+    """The landscape, scrubbable by week when the weekly payload carries ratings."""
+    series = _landscape_weeks(weekly)
+
+    if series is None:
+        needed = {"Team", "ORTG", "DRTG"}
+        if not needed.issubset(adv_df.columns):
+            return
+        df = adv_df[["Team", "ORTG", "DRTG"]].dropna().copy()
+        if df.empty:
+            return
+        _plot_landscape(df, selected_team, *_landscape_domains([df]))
+        return
+
+    labels, frames = series
+    domains = _landscape_domains(frames)
+    choice = st.select_slider(
+        "Week of", options=labels, value=labels[-1],
+        help="Season to date through that week, not that week on its own.",
+    )
+    _plot_landscape(frames[labels.index(choice)], selected_team, *domains)
 
 
 def _percentile_of(entry, teams=30):
@@ -1214,4 +1286,4 @@ st.caption(
     "Every team's offense against its defense. Up and to the right is good on "
     "both counts; the dashed lines are the league average. Credit @Kirk Goldsberry"
 )
-render_efficiency_landscape(adv_df, selected_team)
+render_efficiency_landscape(adv_df, selected_team, weekly)
