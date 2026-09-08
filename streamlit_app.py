@@ -78,17 +78,25 @@ function(params) {
 
 DOUBLE_CLICK_JS = JsCode("function(e){ e.node.setSelected(true); }")
 
-
 # Center both the header label and the cell text. AG Grid aligns headers with
 # flexbox and cells with text-align, so it takes both rules.
 CENTERED_CSS = {
     ".ag-header-cell-label": {"justify-content": "center"},
     ".ag-cell": {"text-align": "center"},
+    # AG Grid's own selection tint is suppressed. Each grid keeps its own
+    # selection, so the table clicked last would stay lit while the other showed
+    # a different team. The shared team is named in the panel labels instead
+    # ("Players: ...", "Narrative: ..."), which cannot go stale.
+    #
+    # It is deliberately not painted from Python either: any per-team grid
+    # option, pre_selected or context alike, changes the component's arguments,
+    # which remounts it and makes the next click report an empty selection.
+    # That is what made picks on the first table land one behind.
+    ".ag-row-selected::before": {"background-color": "transparent !important"},
 }
 
 
-def show_table(df, *, double_click=False, cell_style=None, height=None,
-               pre_selected=None):
+def show_table(df, *, double_click=False, cell_style=None, height=None):
     gb = GridOptionsBuilder.from_dataframe(df)
     # suppressColumnVirtualisation so every column (even off-screen ones on wide
     # tables) gets measured and autosized to its content.
@@ -100,16 +108,11 @@ def show_table(df, *, double_click=False, cell_style=None, height=None,
         gb.configure_default_column(resizable=True, sortable=True)
 
     if double_click:
-        # pre_selected re-applies the shared selection on every rerun, so both
-        # tables highlight the same team instead of each keeping its own.
-        gb.configure_selection(
-            selection_mode="single",
-            use_checkbox=False,
-            pre_selected_rows=pre_selected or [],
-        )
+        gb.configure_selection(selection_mode="single", use_checkbox=False)
         gb.configure_grid_options(
             suppressRowClickSelection=True,
             onRowDoubleClicked=DOUBLE_CLICK_JS,
+            # context carries the shared team through to the row styler.
         )
 
     go = gb.build()
@@ -503,7 +506,7 @@ def render_hot_starts_narrative(team_name, info, league_avg):
         if held_pct is not None:
             kept = "kept" if held_pct >= 0.5 else "gave back"
             insight(
-                f"Halftime: it {kept} the start, carrying a lead at least that big "
+                f"Halftime: They carried a lead at least that big "
                 f"into halftime in {held_pct:.0%} of them "
                 f"({info['held']} of {info['q1_leads']})."
             )
@@ -688,7 +691,8 @@ def render_shooting_variance_narrative(team_name, info, league_avg, as_of):
             )
 
 
-def render_three_point_shooting_narrative(team_name, info, league, prior_season, as_of):
+def render_three_point_shooting_narrative(team_name, info, league, prior_season,
+                                          as_of, league_stdev=None):
     """Render the three-point overview: how much a team shoots from deep, how
     well, how that compares to last season, and who is actually taking them."""
     fg3a = info.get("fg3a")
@@ -715,6 +719,14 @@ def render_three_point_shooting_narrative(team_name, info, league, prior_season,
     if change.get("fg3a") is not None:
         more = change["fg3a"] >= 0
         pills.append((f"{'More' if more else 'Fewer'} than last year", more))
+
+    # Night-to-night swing in 3P% against the league's, the same test the
+    # shooting variance card makes: wider than average is streaky, and streaky
+    # points down because a team you cannot count on is the harder one to read.
+    stdev = info.get("fg3_stdev")
+    if stdev is not None and league_stdev:
+        streaky = stdev > league_stdev
+        pills.append(("Streaky" if streaky else "Stable", not streaky))
 
     if pills:
         bubbles(pills)
@@ -1060,38 +1072,20 @@ basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting, threes, profi
 # under the basic table whenever the narratives column is taller.
 left, right = st.columns(2)
 
-def row_of(df, team_name):
-    """Row ids to pre-select for a team, as AG Grid expects them.
-
-    These land in gridOptions initialState.rowSelection, which matches on row
-    id rather than position. Without a getRowId the ids are the row index as a
-    string, so an int here silently matches nothing.
-    """
-    if not team_name:
-        return []
-    teams = list(df["Team"])
-    return [str(teams.index(team_name))] if team_name in teams else []
-
-
-# Both tables render pre-selected on the team chosen last run, so a new pick on
-# one table clears the stale highlight on the other instead of leaving two rows
-# lit at once.
 active_team = st.session_state.get("selected_team")
 
 # Render the two selectable source tables first (both double-clickable)
 with left:
     section_label("Per Game Stats")
-    basic_result = show_table(basic_df, double_click=True,
-                              pre_selected=row_of(basic_df, active_team))
+    basic_result = show_table(basic_df, double_click=True)
 
     section_label("Advanced Stats")
-    adv_result = show_table(adv_df, double_click=True,
-                            pre_selected=row_of(adv_df, active_team))
+    adv_result = show_table(adv_df, double_click=True)
 
     # The roster follows the team picked on the tables above. active_team is
-    # the settled selection: a new pick triggers a rerun below, so by the time
+    # the settled selection: a new pick triggers the rerun below, so by the time
     # the page is drawn this matches what the rest of the page is showing.
-    section_label(f"{active_team} Players" if active_team else "Players")
+    section_label(f"Players: {active_team}" if active_team else "Players")
     roster = ((players or {}).get("teams", {}) or {}).get(active_team) or []
     if roster:
         roster_df = pd.DataFrame(roster)[list(PLAYER_COLS)].rename(columns=PLAYER_COLS)
@@ -1101,32 +1095,43 @@ with left:
     else:
         st.caption("Double-click a team above to see its players.")
 
-# Figure out which table the user most recently clicked. Both tables come in
-# pre-selected on active_team, so a table reporting anything else is the one
-# just clicked. That is the whole rule, no per-table history needed.
+# Figure out which table the user most recently clicked. Neither table is
+# pre-selected, so each reports only what the user actually picked in it, and
+# anything other than the active team is a fresh pick.
 basic_sel = selected_team_from(basic_result)
 adv_sel   = selected_team_from(adv_result)
 
-if basic_sel is not None and basic_sel != active_team:
+# Each grid holds its own selection for as long as it stays mounted, so the two
+# can legitimately hold different teams. Comparing against active_team alone
+# would then flip between them on every rerun: the table you did not click is
+# always "different", so it would keep claiming the selection back. Compare each
+# table against what it reported last run instead, so only a table whose own
+# value changed counts as the fresh click.
+prev_basic = st.session_state.get("prev_basic_sel")
+prev_adv   = st.session_state.get("prev_adv_sel")
+
+if basic_sel is not None and basic_sel != prev_basic:
     selected_team = basic_sel
-elif adv_sel is not None and adv_sel != active_team:
+elif adv_sel is not None and adv_sel != prev_adv:
     selected_team = adv_sel
 else:
     selected_team = active_team or basic_sel or adv_sel
 
-st.session_state["selected_team"] = selected_team
+st.session_state["prev_basic_sel"] = basic_sel
+st.session_state["prev_adv_sel"]   = adv_sel
+st.session_state["selected_team"]  = selected_team
 
-# The tables above were drawn pre-selected on the previous team, so when the
-# pick changes they need one more pass to move the highlight. This settles
-# immediately: after the rerun the tables agree with active_team and no further
-# rerun is requested.
+# The highlight and the roster above were drawn from the previous team, so a
+# changed pick needs one more pass to move them. This settles immediately:
+# after the rerun everything agrees with active_team.
 if selected_team != active_team:
     st.rerun()
 
 # Now render the comparison tables on the right
 with right:
     if view == "Narratives":
-        section_label("Narratives")
+        section_label(f"Narrative: {selected_team}" if selected_team
+                      else "Narrative")
         if not selected_team:
             st.caption("Double-click a team on either table to see its narratives.")
         else:
@@ -1177,10 +1182,18 @@ with right:
                 tp_as_of  = threes.get("as_of")
                 tp_info   = tp_teams.get(selected_team)
 
+                # League mean game-to-game swing, computed from the other teams
+                # in the same payload rather than stored, so the bubble needs no
+                # schema change and no refresh.
+                tp_spreads = [t["fg3_stdev"] for t in tp_teams.values()
+                              if t.get("fg3_stdev") is not None]
+                tp_stdev = sum(tp_spreads) / len(tp_spreads) if tp_spreads else None
+
                 if tp_info:
                     narratives.append(
                         lambda: render_three_point_shooting_narrative(
-                            selected_team, tp_info, tp_league, tp_prior, tp_as_of
+                            selected_team, tp_info, tp_league, tp_prior, tp_as_of,
+                            tp_stdev
                         )
                     )
 
