@@ -22,6 +22,7 @@ from analytics.GetEffortWhileLosing import GetEffortWhileLosing, SCHEMA as EFFOR
 from analytics.GetShootingVariance import GetShootingVariance, SCHEMA as SHOOTING_SCHEMA
 from analytics.GetThreePointShooting import GetThreePointShooting, SCHEMA as THREEPOINT_SCHEMA
 from analytics.GetTeamProfiles import GetTeamProfiles, SCHEMA as PROFILES_SCHEMA
+from analytics.GetPlayerStats import GetPlayerStats, SCHEMA as PLAYERS_SCHEMA
 from analytics.LineScores import iter_line_scores
 from analytics import GetQ4Comebacks as comebacks
 from analytics.GetQ4Comebacks import SCHEMA as COMEBACKS_SCHEMA
@@ -67,6 +68,7 @@ DATASET_SCHEMA = {
     "shooting": SHOOTING_SCHEMA,
     "threepoint": THREEPOINT_SCHEMA,
     "profiles": PROFILES_SCHEMA,
+    "players": PLAYERS_SCHEMA,
     "hotstarts": HOTSTARTS_SCHEMA,
     "comebacks": COMEBACKS_SCHEMA,
 }
@@ -124,6 +126,8 @@ CORE_DATASETS = (
     ("threepoint",    lambda s: GetThreePointShooting(s)),
     # Three stat calls plus one per play type per side, about 25 seconds.
     ("profiles",      lambda s: GetTeamProfiles(s)),
+    # One league-wide call, split by team.
+    ("players",       lambda s: GetPlayerStats(s)),
 )
 
 # Datasets built from the season's line scores. They share a single crawl

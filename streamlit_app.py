@@ -34,6 +34,12 @@ ADV_COLS = {
     "TM_TOV_PCT": "TOV%", "PACE": "PACE", "PIE": "PIE",
 }
 
+PLAYER_COLS = {
+    "name": "Player", "gp": "GP", "min": "MIN", "pts": "PTS", "reb": "REB",
+    "ast": "AST", "stl": "STL", "blk": "BLK", "tov": "TOV",
+    "fg_pct": "FG%", "fg3_pct": "3P%", "ft_pct": "FT%",
+}
+
 EFFORT_COMPONENT_LABELS = {
     "DEFLECTIONS": "Deflections",
     "CONTESTED_SHOTS": "Contested Shots",
@@ -202,6 +208,9 @@ def load_data(season):
     pf_resp = requests.get(f"{API_URL}/teams/{season}/profiles")
     profiles = pf_resp.json() if pf_resp.ok else None
 
+    pl_resp = requests.get(f"{API_URL}/teams/{season}/players")
+    players = pl_resp.json() if pl_resp.ok else None
+
     basic_raw["2P"]  = basic_raw["FGM"] - basic_raw["FG3M"]
     basic_raw["2PA"] = basic_raw["FGA"] - basic_raw["FG3A"]
     basic_raw["2P%"] = basic_raw["2P"] / basic_raw["2PA"]
@@ -219,6 +228,7 @@ def load_data(season):
         shooting,
         threes,
         profiles,
+        players,
     )
 
 
@@ -1048,7 +1058,7 @@ if data is None:
     st.warning(f"Stats for {season} haven't been precomputed yet. Try another season.")
     st.stop()
 
-basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting, threes, profiles = data
+basic_df, adv_df, weekly, comebacks, effort, hot_starts, shooting, threes, profiles, players = data
 
 # Layout
 # One column pair, with each side stacking its own content. Two separate
@@ -1083,6 +1093,19 @@ with left:
     section_label("Advanced Stats")
     adv_result = show_table(adv_df, double_click=True,
                             pre_selected=row_of(adv_df, active_team))
+
+    # The roster follows the team picked on the tables above. active_team is
+    # the settled selection: a new pick triggers a rerun below, so by the time
+    # the page is drawn this matches what the rest of the page is showing.
+    section_label(f"{active_team} Players" if active_team else "Players")
+    roster = ((players or {}).get("teams", {}) or {}).get(active_team) or []
+    if roster:
+        roster_df = pd.DataFrame(roster)[list(PLAYER_COLS)].rename(columns=PLAYER_COLS)
+        show_table(round_for_display(roster_df), height=320)
+    elif active_team:
+        st.caption("No player stats for this team yet.")
+    else:
+        st.caption("Double-click a team above to see its players.")
 
 # Figure out which table the user most recently clicked. Both tables come in
 # pre-selected on active_team, so a table reporting anything else is the one
