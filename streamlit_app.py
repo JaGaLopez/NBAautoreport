@@ -910,12 +910,9 @@ def render_offensive_overview_narrative(team_name, info):
     plays = info.get("play_types") or []
 
     value, pct = _headline_rank(ranks, "Offensive Rating")
-    if value is None:
-        headline = "Not available"
-    elif pct is None:
-        headline = f"{value:.1f} Offensive Rating"
-    else:
-        headline = f"{value:.1f} Offensive Rating ({_ordinal(pct)} percentile)"
+    # The percentile lives in the bubble below, so the headline carries only
+    # the rating itself.
+    headline = f"{value:.1f} Offensive Rating" if value is not None else "Not available"
     st.metric("Offensive Overview", headline)
 
     if pct is not None:
@@ -956,12 +953,9 @@ def render_defensive_formations_narrative(team_name, info):
     plays = info.get("play_types") or []
 
     value, pct = _headline_rank(ranks, "Defensive Rating")
-    if value is None:
-        headline = "Not available"
-    elif pct is None:
-        headline = f"{value:.1f} Defensive Rating"
-    else:
-        headline = f"{value:.1f} Defensive Rating ({_ordinal(pct)} percentile)"
+    # The percentile lives in the bubble below, so the headline carries only
+    # the rating itself.
+    headline = f"{value:.1f} Defensive Rating" if value is not None else "Not available"
     st.metric("Defensive Formations", headline)
 
     if pct is not None:

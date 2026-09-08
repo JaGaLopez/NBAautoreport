@@ -19,6 +19,7 @@ set -euo pipefail
 DATA_HOST=${DATA_HOST:-/mnt/user/appdata/nbaautoreport/data}
 IMAGE=${IMAGE:-nbaautoreport}
 NAME=${NAME:-nbarefresh}
+STREAMLIT=${STREAMLIT:-nbastats}
 SEASONS=${SEASONS:-"2024-25 2023-24 2022-23 2021-22"}
 
 follow=false
@@ -60,4 +61,13 @@ docker run -d --name "$NAME" \
     "$IMAGE" python -u scripts/precompute.py >/dev/null
 
 echo "Refresh started. Follow it with: docker logs -f ${NAME}"
-$follow && exec docker logs -f "$NAME"
+
+if $follow; then
+    docker logs -f "$NAME"
+    # Streamlit caches each season's payload in process, so without this the
+    # page keeps serving the pre-refresh data and the run looks like a no-op.
+    docker restart "$STREAMLIT" >/dev/null 2>&1 \
+        && echo "Restarted ${STREAMLIT} so the page picks up the new data."
+else
+    echo "When it finishes, run: docker restart ${STREAMLIT}"
+fi

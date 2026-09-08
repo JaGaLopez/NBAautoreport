@@ -1,20 +1,32 @@
 name: Refresh data
 
-# Runs scripts/precompute.py to refresh the JSON the API serves. Decoupled from
-# deploys so a code push never kicks off the slow (~hours) comebacks crawl.
+# Runs scripts/precompute.py to refresh the JSON the API serves.
 #
 # Precompute runs in a one-shot container against the shared data volume, so it
 # is independent of the live API container: a deploy mid-refresh won't kill it,
 # and the API keeps serving the previous data until the new files land (it reads
 # the JSON fresh on each request).
+#
+# It runs automatically after a successful deploy, which is what development
+# needs: a new stat is only visible once the image carries the code AND
+# precompute has written its file. Doing it by hand in the wrong order runs
+# precompute against the previous image, which silently produces nothing.
+#
+# Cost is bounded by design. Precompute recomputes a finished season only when
+# a dataset is missing or its stored schema has changed, so a deploy that
+# touches no stat is a few seconds of no-ops. A schema bump on a line score
+# stat does trigger the crawl, which is roughly ten minutes per season.
 
 on:
   schedule:
-    - cron: '0 11 * * *'   # daily at 11:00 UTC — adjust as desired
+    - cron: '0 11 * * *'   # daily at 11:00 UTC, adjust as desired
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
 
-# Never run two refreshes at once, and let an in-flight one finish (don't cancel
-# — precompute is long and makes a fresh run pointless to interrupt).
+# Never run two refreshes at once, and let an in-flight one finish (don't
+# cancel, precompute is long and makes a fresh run pointless to interrupt).
 concurrency:
   group: refresh-nbaautoreport
   cancel-in-progress: false
@@ -24,6 +36,11 @@ env:
 
 jobs:
   refresh:
+    # A failed or cancelled deploy leaves the old image in place, so refreshing
+    # after one would just recompute against stale code.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: [self-hosted]
     steps:
       # Uses the nbaautoreport image built by the most recent deploy, so it runs
@@ -38,3 +55,11 @@ jobs:
             -v "$DATA_HOST":/app/data \
             -e DATA_DIR=/app/data -e PYTHONPATH=/app -e PYTHONUNBUFFERED=1 -w /app \
             nbaautoreport python -u scripts/precompute.py
+
+      # The API re-reads the JSON per request, but Streamlit caches each
+      # season's payload in process. Without this the page keeps serving the
+      # pre-refresh data until that cache expires, which looks exactly like the
+      # refresh having done nothing.
+      - name: Drop the Streamlit cache
+        if: always()
+        run: docker restart nbastats || true
