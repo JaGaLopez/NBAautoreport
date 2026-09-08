@@ -295,6 +295,20 @@ def insight(text):
     )
 
 
+def section_label(text):
+    """The name of a panel: Per Game Stats, Narratives, and so on.
+
+    White and larger than st.caption, which greys them down to the same weight
+    as the explanatory notes inside the cards. These name what you are looking
+    at, so they sit above that.
+    """
+    st.markdown(
+        f"<p style='font-size:1.25rem; font-weight:600; "
+        f"margin:0 0 0.4rem 0;'>{text}</p>",
+        unsafe_allow_html=True,
+    )
+
+
 # Streamlit's own delta colors, reused so hand-rolled bubbles match the ones
 # st.metric renders on the other cards.
 _BUBBLE_GREEN = "rgb(9, 171, 59)"
@@ -977,7 +991,7 @@ def render_defensive_formations_narrative(team_name, info):
 
 
 # Page setup 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="NBA Auto Report", layout="wide")
 
 st.markdown("""
 <style>
@@ -1000,6 +1014,14 @@ st.markdown("""
         background-color: #0e1117 !important;
     }
     [data-testid="stMetricValue"]   { font-size: 1.6rem; }
+    /* Panel labels moved up to 1.25rem, so the headings and the selectors
+       above them scale by roughly the same factor to keep the hierarchy. */
+    .block-container h1 { font-size: 3rem; }
+    .block-container h3 { font-size: 1.9rem; }
+    [data-testid="stSelectbox"] label p { font-size: 1.15rem; font-weight: 600; }
+    /* The chosen value sits in the combobox input; the surrounding widget
+       renders through a template element that plain CSS cannot reach into. */
+    [data-testid="stSelectbox"] input { font-size: 1.1rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1054,11 +1076,11 @@ active_team = st.session_state.get("selected_team")
 
 # Render the two selectable source tables first (both double-clickable)
 with left:
-    st.caption("Per Game Stats")
+    section_label("Per Game Stats")
     basic_result = show_table(basic_df, double_click=True,
                               pre_selected=row_of(basic_df, active_team))
 
-    st.caption("Advanced Stats")
+    section_label("Advanced Stats")
     adv_result = show_table(adv_df, double_click=True,
                             pre_selected=row_of(adv_df, active_team))
 
@@ -1087,7 +1109,7 @@ if selected_team != active_team:
 # Now render the comparison tables on the right
 with right:
     if view == "Narratives":
-        st.caption("Narratives")
+        section_label("Narratives")
         if not selected_team:
             st.caption("Double-click a team on either table to see its narratives.")
         else:
@@ -1187,14 +1209,14 @@ with right:
                 with st.container(border=True):
                     render()
     else:
-        st.caption("Comparison Chart")
+        section_label("Comparison Chart")
         if not selected_team:
             st.caption("Double-click a team on either table to compare.")
         else:
             show_table(build_comparison(basic_df, selected_team, BASIC_LOWER_IS_BETTER),
                        cell_style=PERCENTILE_STYLE, height=175)
 
-            st.caption("Advanced Stats")
+            section_label("Advanced Stats")
             show_table(build_comparison(adv_df, selected_team, ADV_LOWER_IS_BETTER),
                        cell_style=PERCENTILE_STYLE, height=175)
 
