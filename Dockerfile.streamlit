@@ -4,5 +4,9 @@ COPY requirements.streamlit.txt .
 RUN pip install --no-cache-dir -r requirements.streamlit.txt
 COPY streamlit_app.py theme.py ./
 COPY assets ./assets
+# Streamlit's HTML shell hardcodes a link to its own bundled favicon, which paints
+# before the app can swap in page_icon. Overwrite it so the icon is right from the
+# first frame. The path is resolved from the installed package, not hardcoded.
+RUN cp assets/icon-512.png "$(python -c 'import os, streamlit; print(os.path.dirname(streamlit.__file__))')/static/favicon.png"
 EXPOSE 8501
 CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
