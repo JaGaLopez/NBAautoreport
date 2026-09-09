@@ -947,7 +947,7 @@ def render_offensive_overview_narrative(team_name, info):
             simple_table(pd.DataFrame(_rank_rows(ranks)), height=250)
         if plays:
             simple_table(
-                pd.DataFrame(_play_rows(plays, "Play Type", "Run", "Points/Play")),
+                pd.DataFrame(_play_rows(plays, "Play Type", "Frequency", "Points/Play")),
                 height=250
             )
 
@@ -991,7 +991,7 @@ def render_defensive_overview_narrative(team_name, info):
         if plays:
             simple_table(
                 pd.DataFrame(
-                    _play_rows(plays, "Defending Against", "Faced",
+                    _play_rows(plays, "Defending Against", "Frequency",
                                "Points Allowed")
                 ),
                 height=250,

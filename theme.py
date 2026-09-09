@@ -40,7 +40,10 @@ CHART_LABEL = RULE
 # values track Streamlit's own dark dataframe so the swap is not visible.
 TABLE_BORDER = "rgba(250, 250, 250, 0.1)"
 TABLE_HEADER_TEXT = "rgba(250, 250, 250, 0.6)"
-TABLE_HEADER_BG = "rgba(250, 250, 250, 0.03)"
+# Opaque on purpose. The header is sticky, so a translucent fill would let the
+# rows scrolling beneath it show through and collide with the column names.
+# This is SURFACE_APP lifted 3% toward white, the tint it used to carry.
+TABLE_HEADER_BG = "#15181e"
 
 # Delta pills. Lifted from Streamlit's st.metric so the hand-rolled bubbles in
 # bubbles() match the arrows st.metric draws on the neighboring cards.
