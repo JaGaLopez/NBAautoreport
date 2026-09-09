@@ -166,7 +166,16 @@ PAGE_CSS = f"""
         border-radius: {TABLE_RADIUS};
         margin-bottom: 1rem;
     }}
-    .card-table table {{ width: 100%; border-collapse: collapse; font-size: {FONT_TABLE}; }}
+    /* separate, not collapse: a collapsed border belongs to the table grid
+       rather than to the cell, so a sticky header painted over it leaves the
+       scrolling rows showing through its own band. Each cell carries only a
+       bottom border, so nothing doubles up at border-spacing 0. */
+    .card-table table {{
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: {FONT_TABLE};
+    }}
     .card-table th, .card-table td {{
         text-align: left;
         padding: {TABLE_CELL_PAD};
@@ -176,6 +185,7 @@ PAGE_CSS = f"""
     .card-table th {{
         position: sticky;
         top: 0;
+        z-index: 1;
         background: {TABLE_HEADER_BG};
         color: {TABLE_HEADER_TEXT};
         font-weight: {WEIGHT_EMPHASIS};
