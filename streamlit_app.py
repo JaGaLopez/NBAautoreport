@@ -1,4 +1,5 @@
 import os
+import html
 
 import streamlit as st
 import requests
@@ -122,21 +123,34 @@ def show_table(df, *, double_click=False, cell_style=None, height=None):
 def simple_table(df, height=None):
     """A small read-only table for the narrative cards.
 
-    Deliberately native rather than AG Grid: a grid first drawn inside a
-    collapsed expander lays out at zero width and stays blank when opened, and
-    no resize hook recovers it. st.dataframe re-renders on expand.
+    Plain HTML rather than st.dataframe: that widget draws its cells into a
+    canvas, which is rasterised once at the pixel ratio in force when it
+    painted. A later zoom, or a window moved to a display with a different
+    ratio, leaves the old bitmap upscaled and blurry until something forces a
+    repaint. Text in the DOM re-renders sharp every time.
+
+    AG Grid is not an option here either: a grid first drawn inside a collapsed
+    container lays out at zero width and stays blank when opened.
+
+    height, when given, caps the table and lets it scroll under a sticky header.
     """
-    # Everything is rendered as text so every cell shares the same left edge.
-    # The native grid right-aligns numeric columns and left-aligns text ones,
-    # and it exposes no alignment setting; these tables are display-only, so
-    # nothing depends on the numeric dtype. Blanks stay blank rather than
-    # printing "None".
-    display = df.copy()
-    for column in display.columns:
-        display[column] = display[column].map(
-            lambda value: "" if pd.isna(value) else str(value)
-        )
-    st.dataframe(display, hide_index=True, use_container_width=True, height=height)
+    # Everything is rendered as text so every cell shares the same left edge,
+    # and blanks stay blank rather than printing "None".
+    cells = df.map(lambda value: "" if pd.isna(value) else str(value))
+
+    head = "".join(f"<th>{html.escape(str(c))}</th>" for c in cells.columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(v)}</td>" for v in row) + "</tr>"
+        for row in cells.itertuples(index=False, name=None)
+    )
+    # Built as one line: st.markdown runs the string through a markdown parser
+    # first, and blank lines inside the block would break it up.
+    style = f' style="max-height: {height}px"' if height else ""
+    st.markdown(
+        f'<div class="card-table"{style}>'
+        f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def round_for_display(df):

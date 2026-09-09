@@ -34,6 +34,14 @@ TEXT_PRIMARY = "#fafafa"
 RULE = "#cccccc"
 CHART_LABEL = RULE
 
+# Card tables. These are drawn as plain HTML rather than st.dataframe, which
+# paints into a canvas and goes soft whenever the browser's pixel ratio changes
+# under it (a zoom, or a window moved to a display with a different ratio). The
+# values track Streamlit's own dark dataframe so the swap is not visible.
+TABLE_BORDER = "rgba(250, 250, 250, 0.1)"
+TABLE_HEADER_TEXT = "rgba(250, 250, 250, 0.6)"
+TABLE_HEADER_BG = "rgba(250, 250, 250, 0.03)"
+
 # Delta pills. Lifted from Streamlit's st.metric so the hand-rolled bubbles in
 # bubbles() match the arrows st.metric draws on the neighboring cards.
 DELTA_GOOD = "rgb(9, 171, 59)"
@@ -77,6 +85,7 @@ FONT_METRIC_VALUE = "1.6rem"   # smaller than Streamlit's 2.25rem: the value
 FONT_SELECT_LABEL = "1.15rem"
 FONT_SELECT_INPUT = "1.1rem"
 FONT_BODY = "0.9rem"           # insight()
+FONT_TABLE = "0.875rem"        # simple_table()
 FONT_PILL = "0.875rem"         # bubbles()
 FONT_CHART_LABEL = 10          # Altair takes px, not rem
 
@@ -97,6 +106,9 @@ COLUMN_RULE_PAD = "2rem"       # gutter between the rule and the right column
 MARGIN_BODY = "0.25rem 0 0.5rem 0"
 MARGIN_PANEL_LABEL = "0 0 0.4rem 0"
 MARGIN_PILL_ROW = "-0.5rem 0 0.5rem 0"
+
+TABLE_CELL_PAD = "0.5rem 0.75rem"
+TABLE_RADIUS = "0.25rem"
 
 PILL_PAD = "0.15rem 0.6rem"
 PILL_RADIUS = "0.5rem"
@@ -142,6 +154,30 @@ PAGE_CSS = f"""
     /* The chosen value sits in the combobox input; the surrounding widget
        renders through a template element that plain CSS cannot reach into. */
     [data-testid="stSelectbox"] input {{ font-size: {FONT_SELECT_INPUT}; }}
+    /* Card tables. Left aligned throughout: these are display-only, so nothing
+       reads better right aligned, and one shared edge is easier to scan. The
+       header sticks so it survives a table given a max-height. */
+    .card-table {{
+        overflow: auto;
+        border: 1px solid {TABLE_BORDER};
+        border-radius: {TABLE_RADIUS};
+        margin-bottom: 1rem;
+    }}
+    .card-table table {{ width: 100%; border-collapse: collapse; font-size: {FONT_TABLE}; }}
+    .card-table th, .card-table td {{
+        text-align: left;
+        padding: {TABLE_CELL_PAD};
+        border-bottom: 1px solid {TABLE_BORDER};
+        white-space: nowrap;
+    }}
+    .card-table th {{
+        position: sticky;
+        top: 0;
+        background: {TABLE_HEADER_BG};
+        color: {TABLE_HEADER_TEXT};
+        font-weight: {WEIGHT_EMPHASIS};
+    }}
+    .card-table tbody tr:last-child td {{ border-bottom: none; }}
 </style>
 """
 
