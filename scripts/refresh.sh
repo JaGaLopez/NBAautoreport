@@ -20,7 +20,6 @@ DATA_HOST=${DATA_HOST:-/mnt/user/appdata/nbaautoreport/data}
 IMAGE=${IMAGE:-nbaautoreport}
 NAME=${NAME:-nbarefresh}
 STREAMLIT=${STREAMLIT:-nbastats}
-SEASONS=${SEASONS:-"2024-25 2023-24 2022-23 2021-22"}
 
 follow=false
 force=()
@@ -43,11 +42,14 @@ if docker ps --filter "name=^/${NAME}$" --filter "status=running" --format '{{.N
     exit 1
 fi
 
+# Matched against the files on disk rather than a list of seasons kept here.
+# A season list in this script is one more copy to forget to update, which is
+# exactly how the site sat a season behind while the daily refresh succeeded.
 if [ ${#force[@]} -gt 0 ]; then
     for kind in "${force[@]}"; do
-        for season in $SEASONS; do
-            target="${DATA_HOST}/${season}_${kind}.json"
-            [ -f "$target" ] && rm -f "$target" && echo "removed ${season}_${kind}.json"
+        for target in "${DATA_HOST}"/*_"${kind}".json; do
+            [ -f "$target" ] || continue
+            rm -f "$target" && echo "removed $(basename "$target")"
         done
     done
 fi

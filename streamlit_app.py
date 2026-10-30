@@ -9,14 +9,37 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from st_aggrid.shared import JsCode
 
 import theme
+from seasons import all_seasons
 from theme import bubbles, insight, section_label, tech_note
 
 # Overridable so the app can be pointed at a locally running API during
 # development; defaults to the deployed one.
 API_URL = os.environ.get("NBA_API_URL", "https://nbastats.jglws.com")
 
+
+
+@st.cache_data(ttl=3600)
+def load_seasons():
+    """Seasons the API actually holds data for, newest first.
+
+    Asked of the API rather than hardcoded, so a new season reaches the picker
+    as soon as precompute has built it. The date-derived list in seasons.py is
+    only the fallback, for an API too old to serve /seasons or briefly
+    unreachable; it can name a season whose files do not exist yet.
+    """
+    try:
+        resp = requests.get(f"{API_URL}/seasons", timeout=10)
+        if resp.ok:
+            found = resp.json()
+            if found:
+                return found
+    except requests.RequestException:
+        pass
+    return all_seasons()
+
+
 # Newest first; also the set of seasons used for "historic low" comparisons.
-SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
+SEASONS = load_seasons()
 
 BASIC_COLS = {
     "TEAM_NAME": "Team",

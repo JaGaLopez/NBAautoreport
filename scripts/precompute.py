@@ -29,7 +29,11 @@ from analytics.GetQ4Comebacks import SCHEMA as COMEBACKS_SCHEMA
 from analytics import GetHotStarts as hotstarts
 from analytics.GetHotStarts import SCHEMA as HOTSTARTS_SCHEMA
 
-SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22"]
+from seasons import all_seasons
+
+# Derived from the date, never hand-maintained: a new season joins the list on
+# its own each October. See seasons.py.
+SEASONS = all_seasons()
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 
 # A regular season is complete once every team has played all 82 games.
@@ -158,27 +162,48 @@ def main():
     # front means that if the expensive comebacks pass below is interrupted
     # (throttling, or a redeploy restarting the run), every season still has the
     # stats the dashboard needs instead of only the first one processed.
+    # Seasons listed but not yet under way. Collected here so the expensive
+    # second pass can skip them too.
+    not_started = set()
+
     for season in SEASONS:
         complete = _season_complete(season)
         for kind, compute in CORE_DATASETS:
             # In-progress seasons change daily (recompute); finished seasons only
             # need a file that's actually missing.
-            if not complete or not _core_current(season, kind):
-                print(f"Computing {season} {kind}...")
-                # Isolated per dataset. Without this, one failing stat aborts
-                # the whole refresh, including the line score crawl below, and
-                # every other season silently goes stale.
-                try:
-                    _write(f"{season}_{kind}.json", compute(season))
-                except Exception as e:
-                    print(f"  WARNING: {kind} failed for {season}: {e}")
+            if complete and _core_current(season, kind):
+                continue
+
+            print(f"Computing {season} {kind}...")
+            # Isolated per dataset. Without this, one failing stat aborts
+            # the whole refresh, including the line score crawl below, and
+            # every other season silently goes stale.
+            try:
+                result = compute(season)
+            except Exception as e:
+                print(f"  WARNING: {kind} failed for {season}: {e}")
                 time.sleep(1)
+                continue
+
+            # A season joins the list in October, which can be a few weeks
+            # before the first game. Until then every dataset comes back empty,
+            # and writing those files would publish an empty season to the
+            # site. "basic" is computed first, so one check covers the season.
+            if kind == "basic" and not result:
+                print(f"  {season} has not started yet, skipping it")
+                not_started.add(season)
+                break
+
+            _write(f"{season}_{kind}.json", result)
+            time.sleep(1)
 
     # Pass 2, the expensive, network-fragile line score crawl. One walk over the
     # season feeds every stat built on it, so the cost is the same whether one
     # dataset is missing or all of them are. Isolated per season so a throttled
     # failure on one doesn't starve the rest.
     for season in SEASONS:
+        if season in not_started:
+            continue
         complete = _season_complete(season)
         # Skip only a finished season whose datasets are all already stored in
         # the current {league_average, teams} shape. Older comeback files were

@@ -2,7 +2,7 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.streamlit.txt .
 RUN pip install --no-cache-dir -r requirements.streamlit.txt
-COPY streamlit_app.py theme.py ./
+COPY streamlit_app.py theme.py seasons.py ./
 COPY assets ./assets
 # Streamlit's HTML shell hardcodes a link to its own bundled favicon, which paints
 # before the app can swap in page_icon. Overwrite it so the icon is right from the

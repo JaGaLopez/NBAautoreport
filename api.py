@@ -19,6 +19,25 @@ def _cached(filename):
         return json.load(f)
 
 
+@app.get("/seasons")
+def seasons():
+    """Seasons that have actually been precomputed, newest first.
+
+    The authority for the app's season picker. Deriving the list from the files
+    on disk means a new season appears the moment precompute has built it, and
+    never before: offering a season whose files are missing would put a 503 one
+    click away.
+    """
+    if not os.path.isdir(DATA_DIR):
+        return []
+    found = sorted(
+        name[: -len("_basic.json")]
+        for name in os.listdir(DATA_DIR)
+        if name.endswith("_basic.json")
+    )
+    return list(reversed(found))
+
+
 @app.get("/average-team/{season}")
 def average_team(season: str):
     return _cached(f"{season}_average.json")
